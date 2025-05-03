@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="GradleMigrationSettings" migrationVersion="1" />
+  <component name="GradleSettings">
+    <option name="linkedExternalProjectsSettings">
+      <GradleProjectSettings>
+        <option name="externalProjectPath" value="$PROJECT_DIR$/jack_o_lantern_test_repository" />
+        <option name="gradleJvm" value="#JAVA_HOME" />
+        <option name="modules">
+          <set>
+            <option value="$PROJECT_DIR$/jack_o_lantern_test_repository" />
+          </set>
+        </option>
+      </GradleProjectSettings>
+      <GradleProjectSettings>
+        <option name="externalProjectPath" value="$PROJECT_DIR$/student-exercises/itp2425-H03E01_-_Jack_O_Lantern-8672036-go56puy" />
+      </GradleProjectSettings>
+      <GradleProjectSettings>
+        <option name="externalProjectPath" value="$PROJECT_DIR$/student-exercises/itp2425-H03E01_-_Jack_O_Lantern-8672042-ge47mer" />
+      </GradleProjectSettings>
+      <GradleProjectSettings>
+        <option name="externalProjectPath" value="$PROJECT_DIR$/student-exercises/itp2425-H03E01_-_Jack_O_Lantern-8672047-ge84yeh" />
+      </GradleProjectSettings>
+      <GradleProjectSettings>
+        <option name="externalProjectPath" value="$PROJECT_DIR$/student-exercises/itp2425-H03E01_-_Jack_O_Lantern-8672055-ge87fab" />
+      </GradleProjectSettings>
+      <GradleProjectSettings>
+        <option name="externalProjectPath" value="$PROJECT_DIR$/student-exercises/itp2425-H03E01_-_Jack_O_Lantern-8672058-go56mog" />
+      </GradleProjectSettings>
+      <GradleProjectSettings>
+        <option name="externalProjectPath" value="$PROJECT_DIR$/student-exercises/itp2425-H03E01_-_Jack_O_Lantern-8672066-go76lad" />
+      </GradleProjectSettings>
+    </option>
+  </component>
+</project>
