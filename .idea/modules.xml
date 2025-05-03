@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/bind-student-exercises.iml" filepath="$PROJECT_DIR$/.idea/bind-student-exercises.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/artemis_bwrap.iml" filepath="$PROJECT_DIR$/.idea/artemis_bwrap.iml" />
     </modules>
   </component>
 </project>
