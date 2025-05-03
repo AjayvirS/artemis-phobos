@@ -56,41 +56,41 @@ This repository contains tools to automatically discover the minimal set of file
 ## How it works
 
 1. **detect_minimal_fs.sh**
-   Iteratively prunes filesystem access under a Bubblewrap sandbox: hides (n), tests read-only (r), then writable (w) for each directory.
-   Skips pseudo-FS (/proc, /dev, /sys, /run, /tmp) and large volatile caches (/var/tmp, /var/cache).
-   Binds the parent directory read-only, overrides per-child as needed.
-   Captures and filters build/test output, treating test failures as non-fatal during pruning (regex-driven).
+   - Iteratively prunes filesystem access under a Bubblewrap sandbox: hides (n), tests read-only (r), then writable (w) for each directory.
+   - Skips pseudo-FS (/proc, /dev, /sys, /run, /tmp) and large volatile caches (/var/tmp, /var/cache).
+   - Binds the parent directory read-only, overrides per-child as needed.
+   - Captures and filters build/test output, treating test failures as non-fatal during pruning (regex-driven).
 
 2. **detect_minimal_fs.sh**
-   Loops over each exercise in student-exercises/.
-   Copies that exercise’s source into the shared test repository.
-   Calls `detect_minimal_fs.sh` with the correct build script and environment variables.
-   Collects per-exercise outputs: final_bindings_<ex>.txt (path→n/r/w) and final_bwrap_<ex>.sh (replay command).
+   - Loops over each exercise in student-exercises/.
+   - Copies that exercise’s source into the shared test repository.
+   - Calls `detect_minimal_fs.sh` with the correct build script and environment variables.
+   - Collects per-exercise outputs: final_bindings_<ex>.txt (path→n/r/w) and final_bwrap_<ex>.sh (replay command).
 
 3. **phobos-policy.yaml**
-   Instructors specify exercise-specific overrides: additional writable/readonly paths, network ports, time/memory limits.
+   - Instructors specify exercise-specific overrides: additional writable/readonly paths, network ports, time/memory limits.
 
 4. **JavaWriter (Ares2)**
-   Loads both the auto-generated base policy (union of discovered bindings) and the instructor’s YAML overrides.
-   Eliminates redundant or conflicting rules.
-   Outputs the final phobos.cfg used by the secure test harness.
+   - Loads both the auto-generated base policy (union of discovered bindings) and the instructor’s YAML overrides.
+   - Eliminates redundant or conflicting rules.
+   - Outputs the final phobos.cfg used by the secure test harness.
 
 ## Contributing
-   Add a new language
-   Create a build/test script under build-scripts/ that compiles and runs tests for that language.
-   Extend Dockerfile to install any new dependencies and copy the script into the container.
-   Update run_all_minimal_fs.sh to invoke the new script when iterating exercises.
-   Optimise pruning behavior
-   Update IGNORE_IGNORABLE_FAILURE_PATTERNS in detect_minimal_fs.sh to match new test-runner output for non-fatal errors.
-   Modify the pseudo-FS or critical-path arrays if a language requires additional system directories by default.
+   - Add a new language
+   - Create a build/test script under build-scripts/ that compiles and runs tests for that language.
+   - Extend Dockerfile to install any new dependencies and copy the script into the container.
+   - Update run_all_minimal_fs.sh to invoke the new script when iterating exercises.
+   - Optimise pruning behavior
+   - Update IGNORE_IGNORABLE_FAILURE_PATTERNS in detect_minimal_fs.sh to match new test-runner output for non-fatal errors.
+   - Modify the pseudo-FS or critical-path arrays if a language requires additional system directories by default.
 
 ### Policy evolution
-   Refine phobos-policy.yaml schema to cover new constraints (e.g., database sockets, GPU access).
-   Enhance JavaWriter parsing logic to support new policy sections and merge rules.
+   - Refine phobos-policy.yaml schema to cover new constraints (e.g., database sockets, GPU access).
+   - Enhance JavaWriter parsing logic to support new policy sections and merge rules.
 
 ### Documentation & Examples
-   Add sample exercise folders under student-exercises/<lang>-all/ with expected binding outputs.
-   Update this README with any new caveats or tips learned from real-world usage.
+   - Add sample exercise folders under student-exercises/<lang>-all/ with expected binding outputs.
+   - Update this README with any new caveats or tips learned from real-world usage.
 
 
 © TUM CIT ASE — secure-by-default Bubblewrap sandbox policy discovery tool.
