@@ -18,7 +18,7 @@ ADD jack_o_lantern_test_repository /opt/test-repository
 ADD student-exercises     /opt/student-exercises
 COPY detect_minimal_fs.sh /opt/detect_minimal_fs.sh
 COPY run_minimal_fs_all.sh  /opt/run_minimal_fs_all.sh
-COPY build_script.sh  /opt/test-repository/build_script.sh
+COPY test-repos/java/build_script.sh  /opt/test-repository/build_script.sh
 
 
 RUN chown -R sandboxuser:sandboxuser /opt
