@@ -14,11 +14,11 @@ RUN useradd -m sandboxuser
 
 
 
-ADD jack_o_lantern_test_repository /opt/test-repository
+ADD test-repos /opt/test-repository
 ADD student-exercises     /opt/student-exercises
 COPY detect_minimal_fs.sh /opt/detect_minimal_fs.sh
 COPY run_minimal_fs_all.sh  /opt/run_minimal_fs_all.sh
-COPY test-repos/java/build_script.sh  /opt/test-repository/build_script.sh
+COPY helpers  /opt/helpers
 
 
 RUN chown -R sandboxuser:sandboxuser /opt

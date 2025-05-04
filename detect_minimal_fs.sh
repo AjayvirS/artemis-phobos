@@ -90,8 +90,11 @@ for dir in "${CRITICAL_TOP[@]}" "${LARGE_VOLATILE[@]}"; do
     [[ -d $dir ]] && BASE_OPTIONS+=( --ro-bind "$dir" "$dir" )
 done
 
+local work_dir
+work_dir=$(dirname "$BUILD_SCRIPT")
 TAIL_OPTIONS=(
     --share-net
+    --chdir "$work_dir"
 )
 
 # The associative array CONFIG will store our subdirectory => state (n/r/w).
@@ -127,6 +130,7 @@ build_bwrap_command() {
   if [ "$TARGET" != "/" ]; then
     options+=( --ro-bind "$TARGET" "$TARGET" )
   fi
+
 
   # Then override subdirectories that are hidden (n) or writable (w)
   for path in "${!CONFIG[@]}"; do
