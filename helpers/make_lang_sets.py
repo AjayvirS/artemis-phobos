@@ -4,14 +4,27 @@
 make_lang_sets.py  <lang>  <in_dir>
 Creates  <in_dir>/<lang>_union.paths   and   <in_dir>/<lang>_intersection.paths
 """
-import sys, pathlib, functools
-lang, P = sys.argv[1], pathlib.Path(sys.argv[2])
-sets = [ {l.split()[1] for l in f.read_text().splitlines()}
-         for f in P.glob(f"{lang}_*.paths") ]
-if not sets:
+import sys
+import pathlib
+import functools
+
+lang = sys.argv[1]
+P = pathlib.Path(sys.argv[2])
+
+files = list(P.glob(f"{lang}_*.paths"))
+if not files:
     sys.exit("no .paths found")
+
+sets = [set(f.read_text().splitlines()) for f in files]
+
 u = sorted(functools.reduce(set.union, sets))
 i = sorted(functools.reduce(set.intersection, sets))
-pathlib.Path(P,f"{lang}_union.paths").write_text("\n".join(u))
-pathlib.Path(P,f"{lang}_intersection.paths").write_text("\n".join(i))
-print("done", lang, len(u), len(i))
+
+# Write output files
+union_file = P / f"{lang}_union.paths"
+intersection_file = P / f"{lang}_intersection.paths"
+
+union_file.write_text("\n".join(u))
+intersection_file.write_text("\n".join(i))
+
+print("done", lang, "union size:", len(u), "intersection size:", len(i))

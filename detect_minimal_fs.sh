@@ -133,18 +133,19 @@ build_bwrap_command() {
 
 
   # Then override subdirectories that are hidden (n) or writable (w)
-  for path in "${!CONFIG[@]}"; do
+  # sort paths by depth: parents first, children last
+  sorted_paths=($(for p in "${!CONFIG[@]}"; do
+                    echo "$p"
+                  done | awk -F/ '{print NF " " $0}' | sort -n | cut -d" " -f2-))
+
+  for path in "${sorted_paths[@]}"; do
     case "${CONFIG[$path]}" in
-      n)
-        options+=( --tmpfs "$path" )
-        ;;
-      w)
-        options+=( --bind "$path" "$path" )
-        ;;
-      r)
-        ;;
+      n) options+=( --tmpfs "$path" )  ;;  # must come *after* any parent bind
+      w) options+=( --bind  "$path" "$path" ) ;;
+      r) ;;                                # parent’s ro-bind is already in BASE_OPTIONS
     esac
   done
+
 
 
   options+=( "${TAIL_OPTIONS[@]}" )
@@ -282,37 +283,44 @@ create_final_script() {
 # 9) MAIN EXECUTION
 ###############################################################################
 
-# 1) Init config
+demote_writable_parents() {
+  # If a parent directory is still writable but every child ended up r or n
+  # then the parent can safely fall back to read-only.
+  for child in "${!CONFIG[@]}"; do
+    [[ ${CONFIG[$child]} == "w" ]] && continue          # child needs write
+    parent=$(dirname "$child")
+    while [[ "$parent" != "/" ]]; do
+      if [[ ${CONFIG[$parent]:-} == "w" ]]; then        # parent still write
+        CONFIG["$parent"]="r"
+      fi
+      parent=$(dirname "$parent")
+    done
+  done
+}
+
 echo "Initializing configuration for target: $TARGET"
 init_config
-
-# 2) Start with everything writable as a baseline
-echo "Testing with full writable configuration..."
 for key in "${!CONFIG[@]}"; do
   CONFIG["$key"]="w"
 done
+
+
+echo "Testing with full writable configuration..."
 if ! test_build_script; then
   echo "Build script failed even with full writable configuration. Aborting."
   exit 1
 fi
 
-# 3) Prune
-echo "Starting tree-based pruning..."
+echo "Starting tree based pruning..."
 prune_tree "$TARGET"
 
-# 4) Show final config
+echo "Revisiting parent directories that remained writable..."
+demote_writable_parents
+
 echo "Final mount configuration:"
 for key in "${!CONFIG[@]}"; do
   echo "$key -> ${CONFIG[$key]}"
 done
 
-# 5) Save config
 save_configuration
-
-# 6) Create final script
 create_final_script
-
-# 7) Optionally run final script
-# echo "Running final configuration..."
-# ./final_bwrap.sh
-# exit $?
