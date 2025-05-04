@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EX_ROOT="/opt/student-exercises"
+if [ "$#" -ne 1 ]; then
+  echo "Usage: $0 <lang>"
+  exit 1
+fi
+lang="$1"
+
+BASE_EX_ROOT="/opt/student-exercises"
 TEST_REPO="/opt/test-repository"
 PRUNE_SCRIPT="/opt/detect_minimal_fs.sh"
 BUILD_SCRIPT="$TEST_REPO/build_script.sh"
 OUTPUT_DIR="/opt/bindings-results"
+
+EX_ROOT="$BASE_EX_ROOT/student-exercises-$lang"
 
 mkdir -p "$OUTPUT_DIR"
 
@@ -16,7 +24,7 @@ for ex_dir in "$EX_ROOT"/*; do
     [[ -d "$ex_dir/src" ]] || { echo "No src in $ex_dir – skipping"; continue; }
 
     ex_name=$(basename "$ex_dir")
-    echo "=== Processing $ex_name ==="
+    echo "=== Processing $ex_name ($lang) ==="
 
     # 1. Clean & copy student source into the test repository
     rm -rf "$TARGET_SRC"
@@ -25,7 +33,6 @@ for ex_dir in "$EX_ROOT"/*; do
     cd "/opt"
 
     # 2. Run minimal-fs detection (Gradle build/tests)
-    # We reuse the Gradle wrapper already in test-repository.
     pushd "$TEST_REPO" >/dev/null
 
     "$PRUNE_SCRIPT" \
@@ -37,9 +44,9 @@ for ex_dir in "$EX_ROOT"/*; do
 
     # 3. Archive the result
     mv "$TEST_REPO/final_bindings.txt" \
-       "$OUTPUT_DIR/final_bindings_${ex_name}.txt"
+       "$OUTPUT_DIR/final_bindings_${lang}_${ex_name}.txt"
     mv "$TEST_REPO/final_bwrap.sh" \
-       "$OUTPUT_DIR/final_bwrap_${ex_name}.sh"
+       "$OUTPUT_DIR/final_bwrap_${lang}_${ex_name}.sh"
 
     echo "=== $ex_name done – results in $OUTPUT_DIR ==="
 done
