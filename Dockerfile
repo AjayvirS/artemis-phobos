@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     bubblewrap \
     tree \
     python3 \
+    strace \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m sandboxuser

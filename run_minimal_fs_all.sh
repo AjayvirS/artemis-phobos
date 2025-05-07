@@ -36,7 +36,9 @@ for ex_dir in "$EX_ROOT"/*; do
   "$PRUNE_SCRIPT" \
       --script "$BUILD_SCRIPT" \
       --env "GRADLE_USER_HOME=/tmp/cache/gradle_home" \
-      --env "GRADLE_OPTS=-Dmaven.repo.local=/tmp/cache/m2_repo"
+      --env "GRADLE_OPTS=-Dmaven.repo.local=/tmp/cache/m2_repo" \
+      --assignment-dir "$TEST_REPO/assignment" \
+      --test-dir "$TEST_REPO/test"
 
   popd >/dev/null
 

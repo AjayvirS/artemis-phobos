@@ -14,12 +14,15 @@
 TARGET="/"
 BUILD_SCRIPT="/bin/true"
 BUILD_ENV_VARS=""
+TEST_DIR=""
+ASSIGN_DIR=""
 
 # incase build framework shows "build failure" due to failing tests and not binding error, script should continue pruning
 # Default patterns treated as *harmless test failures* rather than infra errors
 
 
-IGNORABLE_FAILURE_PATTERNS=${IGNORABLE_FAILURE_PATTERNS:-"There were failing tests"}
+IGNORABLE_FAILURE_PATTERNS=${IGNORABLE_FAILURE_PATTERNS:-"There were failing tests|> Task :(compileJava|compileTestJava) NO-SOURCE"}
+UNIGNORABLE_SUCCESS_PATTERNS=${UNIGNORABLE_SUCCESS_PATTERNS:-"> Task :(compileJava|compileTestJava) NO-SOURCE"}
 
 ##############################################################################
 # Canonical path classes
@@ -59,6 +62,14 @@ while [[ $# -gt 0 ]]; do
       BUILD_ENV_VARS="$BUILD_ENV_VARS env $2"
       shift 2
       ;;
+    --assignment-dir)
+      ASSIGN_DIR=$2
+      shift 2
+      ;;
+    --test-dir)
+      TEST_DIR=$2
+      shift 2
+      ;;
     *)
       echo "Unknown argument: $1" >&2
       exit 1
@@ -90,7 +101,7 @@ for dir in "${CRITICAL_TOP[@]}" "${LARGE_VOLATILE[@]}"; do
     [[ -d $dir ]] && BASE_OPTIONS+=( --ro-bind "$dir" "$dir" )
 done
 
-local work_dir
+
 work_dir=$(dirname "$BUILD_SCRIPT")
 TAIL_OPTIONS=(
     --share-net
@@ -126,48 +137,54 @@ init_config() {
 build_bwrap_command() {
   local options=("${BASE_OPTIONS[@]}")
 
-  # If target != "/", read-only bind it as the parent
+  # If TARGET isn't the root, bind it read-only first
   if [ "$TARGET" != "/" ]; then
-    options+=( --ro-bind "$TARGET" "$TARGET" )
+    options+=(--ro-bind "$TARGET" "$TARGET")
   fi
 
+  # Collect depth:weight:path entries
+  local list=() path depth weight mode
+  for path in "${!CONFIG[@]}"; do
+    mode=${CONFIG[$path]}
+    depth=$(grep -o "/" <<<"$path" | wc -l)
+    case "$mode" in
+      w) weight=1 ;; r) weight=2 ;; n) weight=3 ;;
+    esac
+    list+=("$depth:$weight:$path")
+  done
 
-  # Then override subdirectories that are hidden (n) or writable (w)
-  # sort paths by depth: parents first, children last
-  sorted_paths=($(for p in "${!CONFIG[@]}"; do
-                    echo "$p"
-                  done | awk -F/ '{print NF " " $0}' | sort -n | cut -d" " -f2-))
+  # Sort by depth then weight and extract paths
+  local sorted_paths
+  readarray -t sorted_paths < <(
+    printf '%s\n' "${list[@]}" |
+      sort -t: -k1,1n -k2,2n |
+      cut -d: -f3-
+  )
 
+  # Apply bindings in sorted order
   for path in "${sorted_paths[@]}"; do
     case "${CONFIG[$path]}" in
-      n) options+=( --tmpfs "$path" )  ;;  # must come *after* any parent bind
-      w) options+=( --bind  "$path" "$path" ) ;;
-      r) ;;                                # parent’s ro-bind is already in BASE_OPTIONS
+      n) options+=(--tmpfs "$path") ;;  # hide
+      w) options+=(--bind "$path" "$path") ;;  # write
+      r) options+=(--ro-bind "$path" "$path") ;;  # read-only
     esac
   done
 
+  # Append tail options
+  options+=("${TAIL_OPTIONS[@]}")
 
-
-  options+=( "${TAIL_OPTIONS[@]}" )
-
-  # Build env part dynamically
-  # e.g. if PERSISTENT_BUILD_HOME="/tmp/cache/gradle_home", etc.
+  # Build environment variables
   local env_part=""
-  if [ -n "$PERSISTENT_BUILD_HOME" ]; then
-    env_part+=" env BUILD_HOME=$PERSISTENT_BUILD_HOME"
-  fi
-  if [ -n "$BUILD_OPTS" ]; then
-    env_part+=" BUILD_OPTS='$BUILD_OPTS'"
-  fi
-  # also add any user-specified environment variables from arguments:
-  if [ -n "$BUILD_ENV_VARS" ]; then
-    env_part+=" $BUILD_ENV_VARS"
-  fi
+  [ -n "$PERSISTENT_BUILD_HOME" ] && env_part+=" env BUILD_HOME=$PERSISTENT_BUILD_HOME"
+  [ -n "$BUILD_OPTS" ]           && env_part+=" BUILD_OPTS='$BUILD_OPTS'"
+  [ -n "$BUILD_ENV_VARS" ]       && env_part+=" $BUILD_ENV_VARS"
 
-  # Finally, we run /bin/bash -c "$BUILD_SCRIPT"
-  local cmd="bwrap $(printf '%s ' "${options[@]}") $env_part /bin/bash -c '$BUILD_SCRIPT'"
+  # Construct and print the final command
+  local cmd="bwrap $(printf '%s ' "${options[@]}")${env_part} /bin/bash -c '$BUILD_SCRIPT'"
   echo "$cmd"
 }
+
+
 
 #############################
 # test_build_script
@@ -183,26 +200,47 @@ build_bwrap_command() {
 test_build_script() {
     local cmd
     cmd=$(build_bwrap_command)
-    echo "Testing with command:"
-    echo "$cmd"
     ((BWRAP_COMMAND_COUNT++))
+    echo "Testing command number: $BWRAP_COMMAND_COUNT"
+
 
     # run command, capture combined output for inspection
-     set +e
-     eval "$cmd" > /tmp/build.log 2>&1
-     local exit_code=$?
-     set -e
+    tmpfile="/tmp/build-${BWRAP_COMMAND_COUNT}.log"
+
+    echo "=== Run #${BWRAP_COMMAND_COUNT} Command ===" >"$tmpfile"
+    echo "$cmd" >>"$tmpfile"
+    echo ""  >>"$tmpfile"
+
+    set +e
+    eval "$cmd" >"$tmpfile" 2>&1
+    exit_code=$?
+    set -e
 
     # default patterns: Gradle and Maven test-failure line
-    local patterns=${IGNORABLE_FAILURE_PATTERNS:-"There were failing tests"}
-
-    # If build failed, but ONLY due to test failures, treat as success
-    if [[ $exit_code -ne 0 ]]; then
-        if grep -Eq "$patterns" /tmp/build.log ; then
-            echo "Detected harmless test failures – ignoring exit $exit_code for pruning."
-            exit_code=0
-        fi
+    # 1) If it failed but matches an IGNORABLE_FAILURE_PATTERNS, treat as success
+    if (( exit_code != 0 )) \
+       && [[ -n $IGNORABLE_FAILURE_PATTERNS ]] \
+       && grep -Eq "$IGNORABLE_FAILURE_PATTERNS" "$tmpfile"; then
+      exit_code=0
     fi
+
+    # 2) If it succeeded but matches an UNIGNORABLE_SUCCESS_PATTERNS, treat as failure
+    if (( exit_code == 0 )) \
+       && [[ -n $UNIGNORABLE_SUCCESS_PATTERNS ]] \
+       && grep -Eq "$UNIGNORABLE_SUCCESS_PATTERNS" "$tmpfile"; then
+      exit_code=1
+    fi
+
+
+    if [[ $exit_code -eq 0 ]]; then
+        status="success"
+    else
+        status="fail"
+    fi
+    logfile="/tmp/build-${BWRAP_COMMAND_COUNT}-${status}.log"
+    mv "$tmpfile" "$logfile"
+    echo "Logs for run #${BWRAP_COMMAND_COUNT}: $logfile"
+
     return $exit_code
 }
 
@@ -247,6 +285,30 @@ prune_tree() {
   done
 }
 
+# reduce amount of bindings for argument optimisation
+# after pruning, before serializing CONFIG:
+collapse_readonly_parents() {
+  # look at every directory that’s all r, drop its children
+  for parent in "${!CONFIG[@]}"; do
+    [[ "${CONFIG[$parent]}" = r ]] || continue
+    # see if _every_ existing child is also r
+    all_r=true
+    for child in "$parent"/*; do
+      [[ -d "$child" ]] && [[ "${CONFIG[$child]:-r}" = r ]] || { all_r=false; break; }
+    done
+    if $all_r; then
+      # we can remove all child entries
+      for child in "$parent"/*; do
+        unset CONFIG["$child"]
+      done
+    fi
+  done
+}
+
+
+
+
+
 ###############################################################################
 # 7) SAVE CONFIG
 ###############################################################################
@@ -283,21 +345,6 @@ create_final_script() {
 # 9) MAIN EXECUTION
 ###############################################################################
 
-demote_writable_parents() {
-  # If a parent directory is still writable but every child ended up r or n
-  # then the parent can safely fall back to read-only.
-  for child in "${!CONFIG[@]}"; do
-    [[ ${CONFIG[$child]} == "w" ]] && continue          # child needs write
-    parent=$(dirname "$child")
-    while [[ "$parent" != "/" ]]; do
-      if [[ ${CONFIG[$parent]:-} == "w" ]]; then        # parent still write
-        CONFIG["$parent"]="r"
-      fi
-      parent=$(dirname "$parent")
-    done
-  done
-}
-
 echo "Initializing configuration for target: $TARGET"
 init_config
 for key in "${!CONFIG[@]}"; do
@@ -311,16 +358,28 @@ if ! test_build_script; then
   exit 1
 fi
 
+
+
+
 echo "Starting tree based pruning..."
 prune_tree "$TARGET"
 
-echo "Revisiting parent directories that remained writable..."
-demote_writable_parents
 
 echo "Final mount configuration:"
 for key in "${!CONFIG[@]}"; do
   echo "$key -> ${CONFIG[$key]}"
 done
+
+collapse_readonly_parents
+if [[ -n "$ASSIGN_DIR" ]]; then
+  echo "Forcing read-only bind on assignment dir: $ASSIGN_DIR"
+  CONFIG["$ASSIGN_DIR"]=r
+fi
+
+if [[ -n "$TEST_DIR" ]]; then
+  echo "Forcing read-only bind on test dir: $TEST_DIR"
+  CONFIG["$TEST_DIR"]=r
+fi
 
 save_configuration
 create_final_script
