@@ -85,3 +85,4 @@ if __name__ == '__main__':
                 f.write(f"--ro-bind {path} {path}\n")
             # skip 'n'
     print('Wrote', cfg)
+# TODO: add a flag to prefix a --tmpfs / / at the beginning or not
