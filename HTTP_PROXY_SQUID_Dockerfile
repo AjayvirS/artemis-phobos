@@ -1,0 +1,46 @@
+FROM maven:3.9.6-eclipse-temurin-17
+
+MAINTAINER Stephan Krusche <krusche@tum.de>
+
+
+RUN apt-get update && apt-get install -y \
+    gnupg \
+    bubblewrap \
+    squid \
+    tree \
+    python3 \
+    strace \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m sandboxuser
+
+
+
+ADD test-repos /opt/test-repository
+ADD student-exercises     /opt/student-exercises
+
+COPY squid.conf /etc/squid/squid.conf
+COPY detect_minimal_fs.sh /opt/detect_minimal_fs.sh
+COPY run_minimal_fs_all.sh  /opt/run_minimal_fs_all.sh
+COPY helpers  /opt/helpers
+
+# Expose Squid’s proxy port (documentation only)
+# EXPOSE 3128
+
+RUN mkdir -p /var/log/squid
+RUN chown -R sandboxuser:sandboxuser /opt
+RUN chown -R sandboxuser:sandboxuser /var/log/squid
+RUN chmod +x sandboxuser:sandboxuser /opt/*.sh
+RUN squid -z
+
+ENV http_proxy=http://127.0.0.1:3128 https_proxy=http://127.0.0.1:3128
+
+_JAVA_OPTIONS="-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=3128 \
+                 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=3128"
+USER sandboxuser
+
+ENTRYPOINT []
+# Set the default command to run the bwrap script
+# CMD ["bash", "-c", "/opt/detect_minimal_fs.sh"]
+CMD ["/bin/bash"]
+# CMD ["/bin/bash","-c","/opt/detect_minimal_fs.sh --script /opt/build_script.sh --target /"]

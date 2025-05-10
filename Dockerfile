@@ -4,29 +4,38 @@ MAINTAINER Stephan Krusche <krusche@tum.de>
 
 
 RUN apt-get update && apt-get install -y \
-    gnupg \
+    build-essential \
+    gcc \
+    libssl-dev \
+    libnl-3-dev \
     bubblewrap \
     tree \
     python3 \
     strace \
-    && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/*
 
-RUN useradd -m sandboxuser
+# Create a directory for netblocker
+RUN mkdir -p /opt/netblocker && chown sandboxuser:sandboxuser /opt/netblocker
 
-
-
+# Copy student repos and helpers
 ADD test-repos /opt/test-repository
-ADD student-exercises     /opt/student-exercises
-COPY detect_minimal_fs.sh /opt/detect_minimal_fs.sh
-COPY run_minimal_fs_all.sh  /opt/run_minimal_fs_all.sh
-COPY helpers  /opt/helpers
+ADD student-exercises /opt/student-exercises
+COPY detect_minimal_fs.sh run_minimal_fs_all.sh helpers /opt/
 
+# Copy and build the netblocker library
+COPY netblocker.c allowedList.cfg /opt/netblocker/
+RUN gcc -shared -fPIC -ldl -o /opt/netblocker/libnetblocker.so /opt/netblocker/netblocker.c
 
-RUN chown -R sandboxuser:sandboxuser /opt
+# Set permissions
+RUN chown -R sandboxuser:sandboxuser /opt && \
+    chmod +x /opt/*.sh /opt/netblocker/libnetblocker.so
 
-RUN chmod +x /opt/*.sh
-
+# Switch to unprivileged user
 USER sandboxuser
+
+# Environment for LD_PRELOAD inside bwrap
+ENV LD_PRELOAD=/opt/netblocker/libnetblocker.so
+ENV NETBLOCKER_CONF=/opt/netblocker/allowedList.cfg
 
 ENTRYPOINT []
 # Set the default command to run the bwrap script
