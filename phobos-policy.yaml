@@ -77,7 +77,5 @@ regardingTheSupervisedCode:
 
     regardingPackageImports: [ ]
 
-  resourceLimits:
-    cpuSeconds:   120
-    wallSeconds:  180
-    memoryMegabytes: 1024
+    regardingResourceLimits:
+      timeout:   120

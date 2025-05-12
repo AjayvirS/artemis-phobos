@@ -1,28 +1,34 @@
 #!/usr/bin/env python3
 """
-merge_all_paths.py
+make_all_lang_sets.py
 
-Aggregates per-language union and intersection .paths files into cross-language
-union_all.paths, intersection_all.paths, and generates base_phobos.cfg.
+Create
+  • union_all.paths
+  • intersection_all.paths
+  • base_phobos.cfg  (INI format: [readonly] / [write] / [network] / [limits])
+
+Assumes the directory contains one or more  *_union.paths  and  *_intersection.paths
+files produced by the language-specific detectors.
 
 Usage:
-  merge_all_paths.py --dir /opt/path_sets
-Produces:
-  union_all.paths
-  intersection_all.paths
-  base_phobos.cfg
-in the same directory.
+    make_all_lang_sets.py --dir /opt/path_sets
 """
+
+from __future__ import annotations
 import argparse
 import pathlib
 from collections import defaultdict
+from typing import Dict, Iterable
 
-def parse_paths_file(pathfile):
-    """Return dict of path -> mode for a .paths file"""
-    mapping = {}
-    for line in pathfile.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith('#'):
+MODE_RANK: dict[str, int] = {"n": 0, "r": 1, "w": 2}
+
+
+def parse_paths_file(p: pathlib.Path) -> Dict[str, str]:
+    """Return {path: mode} from a .paths file."""
+    mapping: Dict[str, str] = {}
+    for raw in p.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
             continue
         try:
             mode, path = line.split(maxsplit=1)
@@ -31,58 +37,75 @@ def parse_paths_file(pathfile):
         mapping[path] = mode
     return mapping
 
-MODE_RANK = {'n': 0, 'r': 1, 'w': 2}
 
-if __name__ == '__main__':
-    p = argparse.ArgumentParser()
-    p.add_argument('--dir', required=True, help='Directory containing per-language .paths files')
-    args = p.parse_args()
+def strongest_modes(files: Iterable[pathlib.Path]) -> Dict[str, str]:
+    """For each path keep the strongest mode (w > r > n)."""
+    combined: Dict[str, str] = {}
+    for f in files:
+        for path, mode in parse_paths_file(f).items():
+            if path not in combined or MODE_RANK[mode] > MODE_RANK[combined[path]]:
+                combined[path] = mode
+    return combined
 
-    base = pathlib.Path(args.dir)
-    union_files = list(base.glob('*_union.paths'))
-    intersection_files = list(base.glob('*_intersection.paths'))
 
+def intersection_modes(files: Iterable[pathlib.Path]) -> Dict[str, str]:
+    """Paths present in every file.  Mark them 'r'."""
+    counts: defaultdict[str, int] = defaultdict(int)
+    for f in files:
+        for path in parse_paths_file(f):
+            counts[path] += 1
+    total = len(files)
+    return {p: "r" for p, c in counts.items() if c == total}
+
+
+def write_paths_file(mapping: Dict[str, str], outfile: pathlib.Path) -> None:
+    with outfile.open("w") as out:
+        for path, mode in sorted(mapping.items()):
+            out.write(f"{mode} {path}\n")
+    print("Wrote", outfile)
+
+
+# ───────────────────────── main ─────────────────────────────
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dir", required=True, type=pathlib.Path,
+                    help="Directory with *_union.paths / *_intersection.paths")
+    args = ap.parse_args()
+    base_dir: pathlib.Path = args.dir
+
+    union_files  = list(base_dir.glob("*_union.paths"))
+    inter_files  = list(base_dir.glob("*_intersection.paths"))
     if not union_files:
-        print('No union files found in', base)
-        exit(1)
-    if not intersection_files:
-        print('No intersection files found in', base)
-        exit(1)
+        raise SystemExit(f"No *_union.paths files in {base_dir}")
+    if not inter_files:
+        raise SystemExit(f"No *_intersection.paths files in {base_dir}")
 
-    strongest = {}
-    for uf in union_files:
-        m = parse_paths_file(uf)
-        for path, mode in m.items():
-            if path not in strongest or MODE_RANK[mode] > MODE_RANK[strongest[path]]:
-                strongest[path] = mode
+    union_map = strongest_modes(union_files)
+    write_paths_file(union_map, base_dir / "union_all.paths")
 
-    union_all = base / 'union_all.paths'
-    with union_all.open('w') as f:
-        for path, mode in sorted(strongest.items()):
-            f.write(f"{mode} {path}\n")
-    print('Wrote', union_all)
+    inter_map = intersection_modes(inter_files)
+    write_paths_file(inter_map, base_dir / "intersection_all.paths")
 
-    inter_counts = defaultdict(int)
-    for inf in intersection_files:
-        m = parse_paths_file(inf)
-        for path in m:
-            inter_counts[path] += 1
-    total_langs = len(intersection_files)
-    intersection_all = {path: 'r' for path, cnt in inter_counts.items() if cnt == total_langs}
+    readonly = [p for p, m in union_map.items() if m == "r"]
+    writable = [p for p, m in union_map.items() if m == "w"]
 
-    intersection_all_file = base / 'intersection_all.paths'
-    with intersection_all_file.open('w') as f:
-        for path in sorted(intersection_all):
-            f.write(f"r {path}\n")
-    print('Wrote', intersection_all_file)
+    cfg_path = base_dir / "base_phobos.cfg"
+    with cfg_path.open("w") as cfg:
+        if readonly:
+            cfg.write("[readonly]\n")
+            cfg.write("\n".join(sorted(readonly)) + "\n\n")
+        if writable:
+            cfg.write("[write]\n")
+            cfg.write("\n".join(sorted(writable)) + "\n\n")
 
-    cfg = base / 'base_phobos.cfg'
-    with cfg.open('w') as f:
-        for path, mode in sorted(strongest.items()):
-            if mode == 'w':
-                f.write(f"--bind {path} {path}\n")
-            elif mode == 'r':
-                f.write(f"--ro-bind {path} {path}\n")
-            # skip 'n'
-    print('Wrote', cfg)
-# TODO: add a flag to prefix a --tmpfs / / at the beginning or not
+        # default-open network section
+        cfg.write("[network]\nallow *\n\n")
+
+        # default limits
+        cfg.write("[limits]\ntimeout=0\n")
+
+    print("Wrote", cfg_path)
+
+
+if __name__ == "__main__":
+    main()
