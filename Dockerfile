@@ -14,28 +14,21 @@ RUN apt-get update && apt-get install -y \
     strace \
   && rm -rf /var/lib/apt/lists/*
 
-# Create a directory for netblocker
-RUN mkdir -p /opt/netblocker && chown sandboxuser:sandboxuser /opt/netblocker
+RUN useradd -m sandboxuser
+RUN mkdir -p /opt/ld_preloader
 
-# Copy student repos and helpers
 ADD test-repos /opt/test-repository
 ADD student-exercises /opt/student-exercises
-COPY detect_minimal_fs.sh run_minimal_fs_all.sh helpers /opt/
+COPY pruning/detect_minimal_fs.sh pruning/run_minimal_fs_all.sh helpers /opt/
+COPY ld_preloader/netblocker.c ld_preloader/allowedList.cfg /opt/ld_preloader/
 
-# Copy and build the netblocker library
-COPY netblocker.c allowedList.cfg /opt/netblocker/
-RUN gcc -shared -fPIC -ldl -o /opt/netblocker/libnetblocker.so /opt/netblocker/netblocker.c
-
-# Set permissions
+RUN gcc -shared -fPIC -ldl -o /opt/ld_preloader/libnetblocker.so /opt/ld_preloader/netblocker.c
 RUN chown -R sandboxuser:sandboxuser /opt && \
-    chmod +x /opt/*.sh /opt/netblocker/libnetblocker.so
-
-# Switch to unprivileged user
+    chmod +x /opt/*.sh /opt/ld_preloader/libnetblocker.so
 USER sandboxuser
 
-# Environment for LD_PRELOAD inside bwrap
-ENV LD_PRELOAD=/opt/netblocker/libnetblocker.so
-ENV NETBLOCKER_CONF=/opt/netblocker/allowedList.cfg
+ENV LD_PRELOAD=/opt/ld_preloader/libnetblocker.so
+ENV NETBLOCKER_CONF=/opt/ld_preloader/allowedList.cfg
 
 ENTRYPOINT []
 # Set the default command to run the bwrap script

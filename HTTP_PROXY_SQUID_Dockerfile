@@ -19,9 +19,9 @@ RUN useradd -m sandboxuser
 ADD test-repos /opt/test-repository
 ADD student-exercises     /opt/student-exercises
 
-COPY squid.conf /etc/squid/squid.conf
-COPY detect_minimal_fs.sh /opt/detect_minimal_fs.sh
-COPY run_minimal_fs_all.sh  /opt/run_minimal_fs_all.sh
+COPY squid/squid.conf /etc/squid/squid.conf
+COPY pruning/detect_minimal_fs.sh /opt/detect_minimal_fs.sh
+COPY pruning/run_minimal_fs_all.sh  /opt/run_minimal_fs_all.sh
 COPY helpers  /opt/helpers
 
 # Expose Squid’s proxy port (documentation only)
