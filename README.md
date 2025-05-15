@@ -1,4 +1,4 @@
-# artemis_bwrap - Minimal-FS Pruning Toolkit
+# Artemis Phobos - Minimal-FS Pruning Toolkit
 
 This repository contains tools to automatically discover the minimal set of filesystem bindings needed by different build & test frameworks (Java/Gradle/Maven, Python/pytest, C/Make, Swift, etc.) when running inside a Bubblewrap sandbox. It also ties into our “Phobos” security policy workflow, turning raw binding data + per‐exercise overrides into a final `phobos.cfg` for secure execution.
 
