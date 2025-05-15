@@ -9,7 +9,7 @@ lang="$1"
 
 BASE_EX_ROOT="/opt/student-exercises"
 TEST_REPO="/opt/test-repository/$lang"
-PRUNE_SCRIPT="/opt/detect_minimal_fs.sh"
+PRUNE_SCRIPT="/opt/pruning/detect_minimal_fs.sh"
 BUILD_SCRIPT="$TEST_REPO/build_script.sh"
 OUTPUT_DIR="/opt/bindings-results"
 PATH_SETS="/opt/path_sets"
@@ -47,7 +47,7 @@ for ex_dir in "$EX_ROOT"/*; do
   mv "$TEST_REPO/final_bwrap.sh" \
      "$OUTPUT_DIR/final_bwrap_${lang}_${ex_name}.sh"
 
-  python3 /opt/helpers/strip_bindings.py \
+  python3 /opt/helpers/preprocess_bindings.py \
       "$OUTPUT_DIR/final_bindings_${lang}_${ex_name}.txt" \
       "$lang" "$ex_name" "$PATH_SETS"
 

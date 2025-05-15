@@ -1,0 +1,16 @@
+┌─────────────── your program ──────────────┐
+│ 1. getaddrinfo("services.gradle.org", …)  │
+│    │                                      │
+│    ▼ (intercept)                          │
+│ 2. netblocker: hostname in whitelist?     │
+│       ├─ no  →  fail (EAI_FAIL)           │
+│       └─ yes →  call real getaddrinfo     │
+│                cache every numeric IP     │
+│                                             (approved_ips)
+│ 3. connect(fd, "104.16.73.101:443")       │
+│    │                                      │
+│    ▼ (intercept)                          │
+│ 4. netblocker: IP cached or CIDR-match?   │
+│       ├─ yes →  call real connect         │
+│       └─ no  →  errno=EACCES, block       │
+└────────────────────────────────────────────┘

@@ -15,16 +15,19 @@ RUN apt-get update && apt-get install -y \
   && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m sandboxuser
-RUN mkdir -p /opt/ld_preloader
 
 ADD test-repos /opt/test-repository
 ADD student-exercises /opt/student-exercises
-COPY pruning/detect_minimal_fs.sh pruning/run_minimal_fs_all.sh helpers /opt/
-COPY ld_preloader/netblocker.c ld_preloader/allowedList.cfg /opt/ld_preloader/
+
+
+COPY pruning/ /opt/pruning/
+COPY ld_preloader/ /opt/ld_preloader/
+COPY core/ /opt/core/
+COPY helpers/ /opt/helpers/
 
 RUN gcc -shared -fPIC -ldl -o /opt/ld_preloader/libnetblocker.so /opt/ld_preloader/netblocker.c
-RUN chown -R sandboxuser:sandboxuser /opt && \
-    chmod +x /opt/*.sh /opt/ld_preloader/libnetblocker.so
+RUN chown -R sandboxuser:sandboxuser /opt
+RUN find /opt -type f -name '*.sh' -exec chmod 0755 {} +
 USER sandboxuser
 
 ENV LD_PRELOAD=/opt/ld_preloader/libnetblocker.so
