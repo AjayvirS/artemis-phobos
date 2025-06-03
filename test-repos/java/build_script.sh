@@ -3,8 +3,8 @@ set -e
 
 gradle () {
   echo '⚙️ executing gradle'
-  chmod +x ./gradlew
-  ./gradlew clean test
+  # chmod +x ./gradlew
+  ./gradlew clean test --info
 }
 
 main () {

@@ -1,11 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$#" -ne 1 ]; then
-  echo "Usage: $0 <lang>"
+LOG_ENABLED=0
+
+usage() {
+  echo "Usage: $0 [--verbose] <lang>"
   exit 1
+}
+
+if [[ "$1" == "--verbose" ]]; then
+  LOG_ENABLED=1
+  shift
+fi
+
+if [[ "$#" -ne 1 ]]; then
+  usage
 fi
 lang="$1"
+
 
 BASE_EX_ROOT="/opt/student-exercises"
 TEST_REPO="/opt/test-repository/$lang"
@@ -14,17 +26,23 @@ BUILD_SCRIPT="$TEST_REPO/build_script.sh"
 OUTPUT_DIR="/opt/bindings-results"
 PATH_SETS="/opt/path_sets"
 
-EX_ROOT="$BASE_EX_ROOT/student-exercises-$lang"
+EX_ROOT="$BASE_EX_ROOT/$lang"
 
 mkdir -p "$OUTPUT_DIR" "$PATH_SETS"
 
 TARGET_SRC="$TEST_REPO/assignment/src"
 
+log() {
+    if [[ "$LOG_ENABLED" -eq 1 ]]; then
+        echo "[LOG] $*"
+    fi
+}
+
 for ex_dir in "$EX_ROOT"/*; do
-  [[ -d "$ex_dir/src" ]] || { echo "No src in $ex_dir – skipping"; continue; }
+  [[ -d "$ex_dir/src" ]] || { log "No src in $ex_dir – skipping"; continue; }
 
   ex_name=$(basename "$ex_dir")
-  echo "=== Processing $ex_name ($lang) ==="
+  log "=== Processing $ex_name ($lang) ==="
 
   rm -rf "$TARGET_SRC"
   mkdir -p "$TARGET_SRC"
@@ -33,12 +51,20 @@ for ex_dir in "$EX_ROOT"/*; do
 
   pushd "$TEST_REPO" >/dev/null
 
-  "$PRUNE_SCRIPT" \
-      --script "$BUILD_SCRIPT" \
-      --env "GRADLE_USER_HOME=/tmp/cache/gradle_home" \
-      --env "GRADLE_OPTS=-Dmaven.repo.local=/tmp/cache/m2_repo" \
-      --assignment-dir "$TEST_REPO/assignment" \
-      --test-dir "$TEST_REPO/test"
+  PRUNE_ARGS=(
+    --script "$BUILD_SCRIPT"
+    --lang "$lang"
+    --env "GRADLE_USER_HOME=/tmp/cache/gradle_home"
+    --env "GRADLE_OPTS=-Dmaven.repo.local=/tmp/cache/m2_repo"
+    --assignment-dir "$TEST_REPO/assignment"
+    --test-dir "$TEST_REPO/test"
+  )
+
+  if [[ "$LOG_ENABLED" -eq 1 ]]; then
+    PRUNE_ARGS=( --verbose "${PRUNE_ARGS[@]}" )
+  fi
+
+  "$PRUNE_SCRIPT" "${PRUNE_ARGS[@]}"
 
   popd >/dev/null
 
@@ -51,7 +77,5 @@ for ex_dir in "$EX_ROOT"/*; do
       "$OUTPUT_DIR/final_bindings_${lang}_${ex_name}.txt" \
       "$lang" "$ex_name" "$PATH_SETS"
 
-  echo "=== $ex_name done – results in $OUTPUT_DIR and $PATH_SETS ==="
+  log "=== $ex_name done – results in $OUTPUT_DIR and $PATH_SETS ==="
 done
-
-python3 /opt/helpers/make_lang_sets.py "$lang" "$PATH_SETS"

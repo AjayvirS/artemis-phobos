@@ -11,7 +11,7 @@ Assumes the directory contains one or more  *_union.paths  and  *_intersection.p
 files produced by the language-specific detectors.
 
 Usage:
-    make_all_lang_sets.py --dir /opt/path_sets
+    make_all_lang_sets.py --input-dir /opt/path_sets --output-dir /opt/core
 """
 
 from __future__ import annotations
@@ -68,10 +68,13 @@ def write_paths_file(mapping: Dict[str, str], outfile: pathlib.Path) -> None:
 # ───────────────────────── main ─────────────────────────────
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dir", required=True, type=pathlib.Path,
+    ap.add_argument("--input-dir", required=True, type=pathlib.Path,
+                    help="Directory with *_union.paths / *_intersection.paths")
+    ap.add_argument("--output-dir", required=True, type=pathlib.Path,
                     help="Directory with *_union.paths / *_intersection.paths")
     args = ap.parse_args()
-    base_dir: pathlib.Path = args.dir
+    base_dir: pathlib.Path = args.input_dir
+    core_dir: pathlib.Path = args.output_dir
 
     union_files  = list(base_dir.glob("*_union.paths"))
     inter_files  = list(base_dir.glob("*_intersection.paths"))
@@ -89,7 +92,7 @@ def main() -> None:
     readonly = [p for p, m in union_map.items() if m == "r"]
     writable = [p for p, m in union_map.items() if m == "w"]
 
-    cfg_path = base_dir / "base_phobos.cfg"
+    cfg_path = core_dir / "BasePhobos.cfg"
     with cfg_path.open("w") as cfg:
         if readonly:
             cfg.write("[readonly]\n")

@@ -24,4 +24,3 @@ i = sorted(functools.reduce(set.intersection, sets))
 (P / f"{lang}_union.paths").write_text("\n".join(u))
 (P / f"{lang}_intersection.paths").write_text("\n".join(i))
 
-print(f"done {lang} union size: {len(u)}, intersection size: {len(i)}")

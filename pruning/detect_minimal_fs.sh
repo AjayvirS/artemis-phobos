@@ -16,6 +16,8 @@ BUILD_SCRIPT="/bin/true"
 BUILD_ENV_VARS=""
 TEST_DIR=""
 ASSIGN_DIR=""
+LOG_ENABLED=0
+LANG=
 
 # incase build framework shows "build failure" due to failing tests and not binding error, script should continue pruning
 # Default patterns treated as *harmless test failures* rather than infra errors
@@ -70,6 +72,14 @@ while [[ $# -gt 0 ]]; do
       TEST_DIR=$2
       shift 2
       ;;
+    --verbose)
+      LOG_ENABLED=1
+      shift
+      ;;
+    --lang)
+      LANG="$2"
+      shift 2
+      ;;
     *)
       echo "Unknown argument: $1" >&2
       exit 1
@@ -107,6 +117,13 @@ TAIL_OPTIONS=(
     --share-net
     --chdir "$work_dir"
 )
+
+log() {
+    if [[ "$LOG_ENABLED" -eq 1 ]]; then
+        echo "[LOG] $*"
+    fi
+}
+
 
 # The associative array CONFIG will store our subdirectory => state (n/r/w).
 declare -A CONFIG
@@ -200,15 +217,15 @@ test_build_script() {
     local cmd
     cmd=$(build_bwrap_command)
     ((BWRAP_COMMAND_COUNT++))
-    echo "Testing command number: $BWRAP_COMMAND_COUNT"
+    log "Testing command number: $BWRAP_COMMAND_COUNT"
 
 
     # run command, capture combined output for inspection
     tmpfile="/tmp/build-${BWRAP_COMMAND_COUNT}.log"
 
-    echo "=== Run #${BWRAP_COMMAND_COUNT} Command ===" >"$tmpfile"
-    echo "$cmd" >>"$tmpfile"
-    echo ""  >>"$tmpfile"
+    log "=== Run #${BWRAP_COMMAND_COUNT} Command ===" >"$tmpfile"
+    log "$cmd" >>"$tmpfile"
+    log ""  >>"$tmpfile"
 
     set +e
     eval "$cmd" >"$tmpfile" 2>&1
@@ -238,7 +255,7 @@ test_build_script() {
     fi
     logfile="/tmp/build-${BWRAP_COMMAND_COUNT}-${status}.log"
     mv "$tmpfile" "$logfile"
-    echo "Logs for run #${BWRAP_COMMAND_COUNT}: $logfile"
+    log "Logs for run #${BWRAP_COMMAND_COUNT}: $logfile"
 
     return $exit_code
 }
@@ -248,30 +265,30 @@ test_build_script() {
 ###############################################################################
 prune_tree() {
   local parent="$1"
-  echo "Pruning subdirectories of $parent"
+  log "Pruning subdirectories of $parent"
   for child in "${parent%/}"/*; do
     [ -d "$child" ] || continue
     # skip system directories
     is_in_list "$child" "${PSEUDO_FS[@]}" && continue
 
-    echo "Testing candidate: $child"
+    log "Testing candidate: $child"
 
     # Try n => hidden
     CONFIG["$child"]="n"
     if test_build_script; then
-      echo "$child => not required (n)"
+      log "$child => not required (n)"
     else
       # Try r => read-only
       CONFIG["$child"]="r"
       if test_build_script; then
-        echo "$child => read-only (r)"
+        log "$child => read-only (r)"
       else
         # Try w => writable
         CONFIG["$child"]="w"
         if test_build_script; then
-          echo "$child => must be writable (w)"
+          log "$child => must be writable (w)"
         else
-          echo "$child => fails even with w, keep as w"
+          log "$child => fails even with w, keep as w"
           CONFIG["$child"]="w"
         fi
       fi
@@ -313,14 +330,13 @@ collapse_readonly_parents() {
 ###############################################################################
 save_configuration() {
   local outfile="final_bindings.txt"
-  echo "Saving final binding configuration to $outfile"
-  > "$outfile"
+  log "Saving final binding configuration to $outfile" > "$outfile"
   for key in "${!CONFIG[@]}"; do
-    echo "$key -> ${CONFIG[$key]}" >> "$outfile"
+    log "$key -> ${CONFIG[$key]}" >> "$outfile"
   done
-  echo "Total Command Attempts: $BWRAP_COMMAND_COUNT" >> "$outfile"
-  echo "Base options: ${BASE_OPTIONS[*]}" >> "$outfile"
-  echo "Tail options: ${TAIL_OPTIONS[*]}" >> "$outfile"
+  log "Total Command Attempts: $BWRAP_COMMAND_COUNT" >> "$outfile"
+  log "Base options: ${BASE_OPTIONS[*]}" >> "$outfile"
+  log "Tail options: ${TAIL_OPTIONS[*]}" >> "$outfile"
 }
 
 
@@ -343,55 +359,55 @@ demote_writable_parents() {
 ###############################################################################
 create_final_script() {
   local outfile="final_bwrap.sh"
-  echo "#!/bin/bash" > "$outfile"
-  echo "# Replays the final bwrap command with pruned settings." >> "$outfile"
+  log "#!/bin/bash" > "$outfile"
+  log "# Replays the final bwrap command with pruned settings." >> "$outfile"
 
   # We can just store the one-liner. Or to be safe, we replicate build_bwrap_command
   local final_cmd
   final_cmd=$(build_bwrap_command)
 
-  echo "$final_cmd" >> "$outfile"
+  log "$final_cmd" >> "$outfile"
   chmod +x "$outfile"
-  echo "Final bwrap script saved to $outfile"
+  log "Final bwrap script saved to $outfile"
 }
 
 ###############################################################################
 # 9) MAIN EXECUTION
 ###############################################################################
 
-echo "Initializing configuration for target: $TARGET"
+log "Initializing configuration for target: $TARGET"
 init_config
 for key in "${!CONFIG[@]}"; do
   CONFIG["$key"]="w"
 done
 
 
-echo "Testing with full writable configuration..."
+log "Testing with full writable configuration..."
 if ! test_build_script; then
-  echo "Build script failed even with full writable configuration. Aborting."
+  log "Build script failed even with full writable configuration. Aborting."
   exit 1
 fi
 
 
 
 
-echo "Starting tree based pruning..."
+log "Running pruning for exercises of $LANG..."
 prune_tree "$TARGET"
 demote_writable_parents
 
-echo "Final mount configuration:"
+log "Final mount configuration:"
 for key in "${!CONFIG[@]}"; do
-  echo "$key -> ${CONFIG[$key]}"
+  log "$key -> ${CONFIG[$key]}"
 done
 
 collapse_readonly_parents
 if [[ -n "$ASSIGN_DIR" ]]; then
-  echo "Forcing read-only bind on assignment dir: $ASSIGN_DIR"
+  log "Forcing read-only bind on assignment dir: $ASSIGN_DIR"
   CONFIG["$ASSIGN_DIR"]=r
 fi
 
 if [[ -n "$TEST_DIR" ]]; then
-  echo "Forcing read-only bind on test dir: $TEST_DIR"
+  log "Forcing read-only bind on test dir: $TEST_DIR"
   CONFIG["$TEST_DIR"]=r
 fi
 
