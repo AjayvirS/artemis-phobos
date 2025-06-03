@@ -110,7 +110,9 @@ static int from_canonical(const char *s, char out[INET6_ADDRSTRLEN])
 static void load_rules(void)
 {
     const char *conf = getenv("NETBLOCKER_CONF");
-    if (!conf) conf = "allowedList.cfg";
+    if (!conf){
+    fprintf(stderr, "netblocker: Config file not set, set it by assigning NETBLOCKER_CONF env variable.\n");
+    }
     FILE *f = fopen(conf, "r");
     if (!f) { fprintf(stderr,"netblocker: cannot open %s\n",conf); return; }
 
