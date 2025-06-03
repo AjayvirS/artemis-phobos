@@ -120,16 +120,13 @@ declare -A CONFIG
 init_config() {
   shopt -s dotglob
   for item in "$TARGET"*; do
-      [[ -d $item ]] || continue
-      is_in_list "$item" "${PSEUDO_FS[@]}" "${LARGE_VOLATILE[@]}" && continue
-
-    # skip . and .., etc.
-    if [ -d "$item" ] && [[ "$(basename "$item")" != "." && "$(basename "$item")" != ".." ]]; then
-      CONFIG["$item"]="r"
-    fi
+    [[ -d $item ]] || continue
+    is_in_list "$item" "${PSEUDO_FS[@]}" "${LARGE_VOLATILE[@]}" "${CRITICAL_TOP[@]}" && continue
+    CONFIG["$item"]="r"
   done
   shopt -u dotglob
 }
+
 
 ###############################################################################
 # 4) BUILD THE BWRAP COMMAND
@@ -148,7 +145,9 @@ build_bwrap_command() {
     mode=${CONFIG[$path]}
     depth=$(grep -o "/" <<<"$path" | wc -l)
     case "$mode" in
-      w) weight=1 ;; r) weight=2 ;; n) weight=3 ;;
+      n) weight=0 ;;
+      r) weight=1 ;;
+      w) weight=2 ;;
     esac
     list+=("$depth:$weight:$path")
   done
@@ -324,6 +323,21 @@ save_configuration() {
   echo "Tail options: ${TAIL_OPTIONS[*]}" >> "$outfile"
 }
 
+
+demote_writable_parents() {
+  for child in "${!CONFIG[@]}"; do
+    [[ ${CONFIG[$child]} == "w" ]] && continue
+    parent=$(dirname "$child")
+    while [[ $parent != "/" ]]; do
+      if [[ ${CONFIG[$parent]:-} == "w" ]]; then
+          CONFIG["$parent"]="r"
+      fi
+      parent=$(dirname "$parent")
+    done
+  done
+}
+
+
 ###############################################################################
 # 8) CREATE A FINAL BWRAP SCRIPT
 ###############################################################################
@@ -363,7 +377,7 @@ fi
 
 echo "Starting tree based pruning..."
 prune_tree "$TARGET"
-
+demote_writable_parents
 
 echo "Final mount configuration:"
 for key in "${!CONFIG[@]}"; do
