@@ -4,7 +4,7 @@ set -euo pipefail
 err(){ echo -e "\e[31m[error]\e[0m $*" >&2; exit 1; }
 usage(){
 cat <<EOF
-usage: $0 -b base.cfg --lang lang [-e extra.cfg] [--tail tail_static.cfg] -- buildScript.sh [args]
+usage: $0 --base base.cfg --lang lang [--extra extra.cfg] [--tail tail_static.cfg] -- buildScript.sh [args]
 EOF
 exit 1; }
 
