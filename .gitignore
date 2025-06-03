@@ -1,3 +1,5 @@
 /replace_detect_minimal_fs.ps1
 /rebuild_image.ps1
 /.idea
+/test-repos/**
+/student-exercises/**

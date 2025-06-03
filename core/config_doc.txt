@@ -1,0 +1,21 @@
+
+1. Relevant hooks
+
+| Stage                   | Function(s)               | Notes                                           |
+| ----------------------- | ------------------------- | ----------------------------------------------- |
+| Name resolution         | `getaddrinfo()`           | Filter by hostname before any socket is made.   |
+| Socket creation         | `socket()`                | See every new FD, whether client or server.     |
+| Outgoing connect        | `connect()`               | Client‐side: inspect peer IP/port before SYN.   |
+| Incoming accept         | `accept()`<br>`accept4()` | Server‐side: inspect peer IP/port after SYN.    |
+| (Optional server setup) | `bind()`, `listen()`      | If you need to see which ports a service opens. |
+
+
+2. Config mapping:
+
+    openConnections: hook connect() (outgoing) and accept()/accept4() (incoming).
+    sendData: hook send()/write()
+    receiveData: hook recv()/read()
+
+
+
+
