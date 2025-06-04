@@ -1,40 +1,27 @@
-FROM maven:3.9.6-eclipse-temurin-17
-
-MAINTAINER Stephan Krusche <krusche@tum.de>
+FROM ls1tum/artemis-maven-template:java17-22 AS base
 
 
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    gcc \
-    libssl-dev \
-    libnl-3-dev \
     bubblewrap \
     tree \
-    python3 \
-    strace \
   && rm -rf /var/lib/apt/lists/*
+
 
 RUN useradd -m sandboxuser
 
-ADD test-repos /opt/test-repository
-ADD student-exercises /opt/student-exercises
 
+RUN mkdir -p /opt/core
+COPY core/phobos_wrapper.sh                 /opt/core/
+COPY ld_preloader/libnetblocker.so                  /opt/core/
+COPY core/*.cfg                     /opt/core/
 
-COPY pruning/ /opt/pruning/
-COPY ld_preloader/ /opt/ld_preloader/
-COPY core/ /opt/core/
-COPY helpers/ /opt/helpers/
-
-RUN gcc -shared -fPIC -ldl -o /opt/ld_preloader/libnetblocker.so /opt/ld_preloader/netblocker.c
 RUN chown -R sandboxuser:sandboxuser /opt
-RUN find /opt -type f -name '*.sh' -exec chmod 0755 {} +
+RUN chmod +x /opt/core/phobos_wrapper.sh \
+             /opt/core/*.cfg
+
+ENV PATH=/opt/core:$PATH
+
 USER sandboxuser
 
-ENV LD_PRELOAD=/opt/ld_preloader/libnetblocker.so
-ENV NETBLOCKER_CONF=/opt/ld_preloader/allowedList.cfg
-
-ENTRYPOINT []
-# Set the default command to run the bwrap script
-# CMD ["bash", "-c", "/opt/detect_minimal_fs.sh"]
+#ENTRYPOINT ["/opt/core/phobos_wrapper.sh", "-b", "/opt/core/BaseStatic.cfg", "-e", "/opt/core/BasePhobos.cfg", "-t", "/opt/core/TailStatic.cfg", "--", "/var/tmp/script.sh"]
 CMD ["/bin/bash"]
-# CMD ["/bin/bash","-c","/opt/detect_minimal_fs.sh --script /opt/build_script.sh --target /"]

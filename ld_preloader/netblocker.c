@@ -1,4 +1,6 @@
-#define _GNU_SOURCE#include <dlfcn.h>
+#define _GNU_SOURCE
+
+#include <dlfcn.h>
 
 #include <stdio.h>
 
@@ -207,6 +209,7 @@ static int host_allowed(const char * h, unsigned short port) {
   pthread_rwlock_rdlock( & rules_lock);
   for (rule_t * r = rules; r; r = r -> next) {
     if (r -> cidr_bits) continue;
+    if (port == 0 && host_match(h, r)) { pthread_rwlock_unlock(&rules_lock); return 1; }
     if ((!r -> port || r -> port == port || port == 0) && host_match(h, r)) {
       pthread_rwlock_unlock( & rules_lock);
       return 1;
