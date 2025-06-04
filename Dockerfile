@@ -1,7 +1,7 @@
 FROM ls1tum/artemis-maven-template:java17-22 AS base
 
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get install -y \
     bubblewrap \
     tree \
   && rm -rf /var/lib/apt/lists/*
