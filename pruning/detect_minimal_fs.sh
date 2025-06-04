@@ -223,9 +223,10 @@ test_build_script() {
     # run command, capture combined output for inspection
     tmpfile="/tmp/build-${BWRAP_COMMAND_COUNT}.log"
 
-    log "=== Run #${BWRAP_COMMAND_COUNT} Command ===" >"$tmpfile"
-    log "$cmd" >>"$tmpfile"
-    log ""  >>"$tmpfile"
+    echo "=== Run #${BWRAP_COMMAND_COUNT} Command ===" >"$tmpfile"
+
+    echo "$cmd" >>"$tmpfile"
+    echo ""  >>"$tmpfile"
 
     set +e
     eval "$cmd" >"$tmpfile" 2>&1
@@ -330,13 +331,18 @@ collapse_readonly_parents() {
 ###############################################################################
 save_configuration() {
   local outfile="final_bindings.txt"
-  log "Saving final binding configuration to $outfile" > "$outfile"
+  echo "Saving final binding configuration to $outfile" > "$outfile"
+  log "Saving final binding configuration to $outfile"
   for key in "${!CONFIG[@]}"; do
-    log "$key -> ${CONFIG[$key]}" >> "$outfile"
+    echo "$key -> ${CONFIG[$key]}" >> "$outfile"
   done
-  log "Total Command Attempts: $BWRAP_COMMAND_COUNT" >> "$outfile"
-  log "Base options: ${BASE_OPTIONS[*]}" >> "$outfile"
-  log "Tail options: ${TAIL_OPTIONS[*]}" >> "$outfile"
+  echo "Total Command Attempts: $BWRAP_COMMAND_COUNT" >> "$outfile"
+  echo "Base options: ${BASE_OPTIONS[*]}" >> "$outfile"
+  echo "Tail options: ${TAIL_OPTIONS[*]}" >> "$outfile"
+
+  log "Total Command Attempts: $BWRAP_COMMAND_COUNT"
+  log "Base options: ${BASE_OPTIONS[*]}"
+  log "Tail options: ${TAIL_OPTIONS[*]}"
 }
 
 
@@ -359,14 +365,14 @@ demote_writable_parents() {
 ###############################################################################
 create_final_script() {
   local outfile="final_bwrap.sh"
-  log "#!/bin/bash" > "$outfile"
-  log "# Replays the final bwrap command with pruned settings." >> "$outfile"
+  echo "#!/bin/bash" > "$outfile"
+  echo "# Replays the final bwrap command with pruned settings." >> "$outfile"
 
   # We can just store the one-liner. Or to be safe, we replicate build_bwrap_command
   local final_cmd
   final_cmd=$(build_bwrap_command)
 
-  log "$final_cmd" >> "$outfile"
+  echo "$final_cmd" >> "$outfile"
   chmod +x "$outfile"
   log "Final bwrap script saved to $outfile"
 }

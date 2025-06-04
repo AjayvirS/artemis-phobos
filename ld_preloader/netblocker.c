@@ -1,266 +1,307 @@
-/*
- *  netblocker.c  –  hybrid: check hostname in getaddrinfo,
- *                   enforce by IP in connect.
- *
- *  Rule file (NETBLOCKER_CONF env, default allowedList.cfg):
- *       # one per line
- *       services.gradle.org
- *       api.example.com
- *       192.168.0.0/16
- *       *                # wildcard
- */
+#define _GNU_SOURCE#include <dlfcn.h>
 
-#define _GNU_SOURCE
-#include <dlfcn.h>
 #include <stdio.h>
+
 #include <stdlib.h>
+
 #include <string.h>
+
 #include <strings.h>
+
 #include <errno.h>
+
 #include <pthread.h>
+
 #include <arpa/inet.h>
+
 #include <netdb.h>
+
+#include <signal.h>
+
+#include <stdint.h>
+
 #include <sys/socket.h>
 
-/* --------------------- rule table --------------------- */
-typedef struct rule_s {
-    char *host;
-    struct in6_addr cidr_addr;
-    int cidr_bits;
-    struct rule_s *next;
-} rule_t;
+/*=======================  Rule table  =======================*/
 
-static rule_t *rules = NULL;
+typedef struct rule {
+  char * host; /* literal, wildcard, or "*"             */
+  struct in6_addr net6; /* v6‑mapped network base for CIDR rules  */
+  int cidr_bits; /* 0 ⇒ host/IP rule                       */
+  unsigned short port; /* 0 ⇒ any port                           */
+  struct rule * next;
+}
+rule_t;
 
-/* ------------------ approved ip set ------------------ */
-typedef struct ipnode { char ip[INET6_ADDRSTRLEN]; struct ipnode *next; } ipnode;
-static ipnode *approved_ips = NULL;
+static rule_t * rules = NULL;
+static pthread_rwlock_t rules_lock = PTHREAD_RWLOCK_INITIALIZER;
+
+/*=======================  <IP,port> cache  ==================*/
+
+typedef struct ip_node {
+  char ip[INET6_ADDRSTRLEN];
+  unsigned short port;
+  struct ip_node * next;
+}
+ip_t;
+static ip_t * ip_cache = NULL;
+static size_t ip_cache_sz = 0;
+static
+const size_t IP_CACHE_MAX = 1024;
 static pthread_mutex_t ip_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static int ip_set_contains(const char *ip)
-{
-    pthread_mutex_lock(&ip_lock);
-    for (ipnode *n = approved_ips; n; n = n->next)
-        if (strcasecmp(n->ip, ip) == 0) { pthread_mutex_unlock(&ip_lock); return 1; }
-    pthread_mutex_unlock(&ip_lock);
-    return 0;
+static int ip_cache_contains(const char * ip, unsigned short port) {
+  pthread_mutex_lock( & ip_lock);
+  for (ip_t * n = ip_cache; n; n = n -> next)
+    if (!strcasecmp(n -> ip, ip) && (n -> port == 0 || n -> port == port)) {
+      pthread_mutex_unlock( & ip_lock);
+      return 1;
+    }
+  pthread_mutex_unlock( & ip_lock);
+  return 0;
 }
 
-static void ip_set_insert(const char *ip)
-{
-    if (ip_set_contains(ip)) return;
-    ipnode *n = malloc(sizeof *n);
-    strcpy(n->ip, ip);
-    pthread_mutex_lock(&ip_lock);
-    n->next = approved_ips; approved_ips = n;
-    pthread_mutex_unlock(&ip_lock);
+static void ip_cache_insert(const char * ip, unsigned short port) {
+  if (ip_cache_contains(ip, port)) return;
+  ip_t * n = calloc(1, sizeof * n);
+  strncpy(n -> ip, ip, sizeof n -> ip - 1);
+  n -> port = port;
+  pthread_mutex_lock( & ip_lock);
+  n -> next = ip_cache;
+  ip_cache = n;
+  if (++ip_cache_sz > IP_CACHE_MAX) {
+    ip_t * cur = ip_cache, * prev = NULL;
+    while (cur && cur -> next) {
+      prev = cur;
+      cur = cur -> next;
+    }
+    if (prev) {
+      free(cur);
+      prev -> next = NULL;
+      ip_cache_sz--;
+    }
+  }
+  pthread_mutex_unlock( & ip_lock);
 }
 
-/* -------------- helpers for CIDR match --------------- */
-static int cidr_match(const struct in6_addr *addr,
-                      const struct in6_addr *net, int bits)
-{
-    if (bits == 0) return 0;
-    int full_bytes = bits / 8;
-    int rem_bits   = bits % 8;
-    if (memcmp(addr, net, full_bytes) != 0) return 0;
-    if (rem_bits) {
-        uint8_t mask = ~((1 << (8 - rem_bits)) - 1);
-        return ((addr->s6_addr[full_bytes] & mask) ==
-                (net ->s6_addr[full_bytes] & mask));
-    }
-    return 1;
+static void ip_cache_clear(void) {
+  pthread_mutex_lock( & ip_lock);
+  while (ip_cache) {
+    ip_t * n = ip_cache -> next;
+    free(ip_cache);
+    ip_cache = n;
+  }
+  ip_cache_sz = 0;
+  pthread_mutex_unlock( & ip_lock);
 }
 
+/*=======================  Helpers  ==========================*/
 
-/*  If s is "127.0.0.1"           → copy unchanged
- *           "::ffff:127.0.0.1"   → writes "127.0.0.1"
- *           "::1" or other IPv6  → copy unchanged
- *  Returns 0 on success, -1 on parse error                                */
-static int from_canonical(const char *s, char out[INET6_ADDRSTRLEN])
-{
-
-    struct in6_addr v6;
-    if (inet_pton(AF_INET6, s, &v6) == 1) {
-        /* check for v4-mapped prefix ::ffff:0:0/96 */
-        static const unsigned char v4map[12] =
-            {0,0,0,0,0,0,0,0,0,0,0xff,0xff};
-        if (memcmp(v6.s6_addr, v4map, 12) == 0) {
-            snprintf(out, INET6_ADDRSTRLEN, "%u.%u.%u.%u",
-                     v6.s6_addr[12], v6.s6_addr[13],
-                     v6.s6_addr[14], v6.s6_addr[15]);
-            return 0;
-        }
-        /* pure IPv6 → keep string as-is */
-        strncpy(out, s, INET6_ADDRSTRLEN);
-        return 0;
-    }
-    /* maybe already v4 text */
-    struct in_addr v4;
-    if (inet_pton(AF_INET, s, &v4) == 1) {
-        strncpy(out, s, INET6_ADDRSTRLEN);
-        return 0;
-    }
-    return -1;
-}
-
-
-
-/* -------------- parsing the rule file ---------------- */
-static void load_rules(void)
-{
-    const char *conf = getenv("NETBLOCKER_CONF");
-    if (!conf){
-    fprintf(stderr, "netblocker: Config file not set, set it by assigning NETBLOCKER_CONF env variable.\n");
-    }
-    FILE *f = fopen(conf, "r");
-    if (!f) { fprintf(stderr,"netblocker: cannot open %s\n",conf); return; }
-
-    char line[256];
-    while (fgets(line,sizeof line,f)) {
-        char *hash = strchr(line,'#'); if (hash) *hash = 0;
-
-        /* first token = host or CIDR or "*"              */
-        char *tok = strtok(line, " \t\r\n"); if (!tok) continue;
-
-        rule_t *r = calloc(1, sizeof *r);
-
-        /* ------------- CIDR rule? ------------- */
-        char *slash = strchr(tok, '/');
-        if (slash) {
-            *slash = 0;
-            r->cidr_bits = atoi(slash + 1);
-            inet_pton(AF_INET6, tok, &r->cidr_addr);
-            r->host = strdup(tok);
-        }
-        else {
-            /* normal host or numeric IP — normalise numeric forms */
-            char plain[INET6_ADDRSTRLEN];
-            if (from_canonical(tok, plain) == 0)
-                r->host = strdup(plain);
-            else
-                r->host = strdup(tok);
-        }
-
-        /* prepend to list */
-        r->next = rules;
-        rules   = r;
-    }
-    fclose(f);
-}
-
-
-
-/* ------------------- allow check -------------------- */
-static int host_allowed(const char *host)
-{
-    if (!host) return 0;
-    for (rule_t *r = rules; r; r = r->next) {
-
-        /* wildcard rule */
-        if (strcasecmp(r->host, "*") == 0) return 1;
-
-        /* suffix wildcard: rule starts with "*." */
-        if (r->host[0] == '*' && r->host[1] == '.') {
-            const char *suffix = r->host + 1;
-            size_t hl = strlen(host), sl = strlen(suffix);
-            if (hl >= sl && strcasecmp(host + hl - sl, suffix) == 0)
-                return 1;
-        }
-
-        /* exact match */
-        if (strcasecmp(host, r->host) == 0)
-            return 1;
+static int to_canon(const char * src, char * canon, struct in6_addr * out6) {
+  if (inet_pton(AF_INET6, src, out6) == 1) {
+    if (canon) {
+      strncpy(canon, src, INET6_ADDRSTRLEN - 1);
+      canon[INET6_ADDRSTRLEN - 1] = '\0';
     }
     return 0;
-}
-
-
-static int ip_allowed(const char *ip)
-{
-    /* fast path: already ok */
-    if (ip_set_contains(ip)) return 1;
-
-    struct in6_addr addr6;
-    inet_pton(AF_INET6, ip, &addr6);
-
-    for (rule_t *r = rules; r; r = r->next) {
-        if (strcasecmp(r->host,"*")==0) return 1;
-        if (strchr(r->host,'.')==NULL && strchr(r->host,':')==NULL)
-            continue;
-        if (r->cidr_bits) {
-            if (cidr_match(&addr6,&r->cidr_addr,r->cidr_bits))
-                return 1;
-        } else if (strcasecmp(r->host, ip)==0) {
-            return 1;
-        }
-    }
+  }
+  struct in_addr v4;
+  if (inet_pton(AF_INET, src, & v4) == 1) {
+    memset(out6, 0, sizeof * out6);
+    out6 -> s6_addr[10] = 0xff;
+    out6 -> s6_addr[11] = 0xff;
+    memcpy( & out6 -> s6_addr[12], & v4, 4);
+    if (canon) inet_ntop(AF_INET, & v4, canon, INET6_ADDRSTRLEN);
     return 0;
+  }
+  return -1;
 }
 
-/* ---------------- real functions -------------------- */
-typedef int (*orig_getaddrinfo_f)(const char*,const char*,
-                                  const struct addrinfo*,struct addrinfo**);
-typedef int (*orig_connect_f)(int,const struct sockaddr*,socklen_t);
-static orig_getaddrinfo_f real_gai   = NULL;
-static orig_connect_f    real_conn = NULL;
+static int cidr_match(const struct in6_addr * addr,
+  const struct in6_addr * net, int bits) {
+  if (bits <= 0 || bits > 128) return 0;
+  int full = bits / 8, rem = bits % 8;
+  if (memcmp(addr, net, full) != 0) return 0;
+  if (!rem) return 1;
+  uint8_t mask = ~((1 << (8 - rem)) - 1);
+  return ((addr -> s6_addr[full] & mask) == (net -> s6_addr[full] & mask));
+}
 
-/* ------------------- getaddrinfo -------------------- */
-int getaddrinfo(const char *node, const char *svc,
-                const struct addrinfo *hints, struct addrinfo **res)
-{
-    if (!real_gai)
-        real_gai = (orig_getaddrinfo_f)dlsym(RTLD_NEXT,"getaddrinfo");
+/*=======================  Rule loading  =====================*/
 
-    if (node && !host_allowed(node)) {
-        fprintf(stderr,"netblocker: BLOCK DNS %s\n", node);
-        return EAI_FAIL;
+static void free_rules(void) {
+  while (rules) {
+    rule_t * n = rules -> next;
+    free(rules -> host);
+    free(rules);
+    rules = n;
+  }
+}
+
+static void load_rules_inner(void) {
+  const char * cfg = getenv("NETBLOCKER_CONF");
+  if (!cfg) return;
+  FILE * f = fopen(cfg, "r");
+  if (!f) return;
+  char line[512];
+  while (fgets(line, sizeof line, f)) {
+    char * hash = strchr(line, '#');
+    if (hash) * hash = '\0';
+    char * tok = strtok(line, " \t\r\n");
+    if (!tok) continue;
+    char * porttok = strtok(NULL, " \t\r\n");
+    unsigned short port = 0;
+    if (porttok && strcmp(porttok, "*")) {
+      char * end;
+      unsigned long p = strtoul(porttok, & end, 10);
+      if ( * end || p > 65535) continue;
+      port = (unsigned short) p;
     }
-    int rc = real_gai(node,svc,hints,res);
-
-    /* cache numeric IPs for allowed hostnames */
-    if (rc==0 && node && host_allowed(node)) {
-        for (struct addrinfo *ai=*res; ai; ai=ai->ai_next) {
-            char canon[INET6_ADDRSTRLEN];
-            getnameinfo(ai->ai_addr, ai->ai_addrlen, canon, sizeof canon,
-                        NULL, 0, NI_NUMERICHOST | NI_NUMERICSERV);
-
-            char plain[INET6_ADDRSTRLEN];
-            if (from_canonical(canon, plain) == 0)
-                ip_set_insert(plain);
-
-        }
+    int cidr = 0;
+    struct in6_addr net6;
+    char * slash = strchr(tok, '/');
+    if (slash) {
+      * slash = '\0';
+      char * end;
+      unsigned long bits = strtoul(slash + 1, & end, 10);
+      if ( * end || bits == 0 || bits > 128) continue;
+      cidr = (int) bits;
+      if (to_canon(tok, NULL, & net6) != 0) continue;
     }
-    return rc;
+    rule_t * r = calloc(1, sizeof * r);
+    r -> host = strdup(tok);
+    r -> cidr_bits = cidr;
+    r -> port = port;
+    if (cidr) r -> net6 = net6;
+    r -> next = rules;
+    rules = r;
+  }
+  fclose(f);
 }
 
-/* --------------------- connect ---------------------- */
-int connect(int fd, const struct sockaddr *sa, socklen_t len)
-{
-    if (!real_conn)
-        real_conn = (orig_connect_f)dlsym(RTLD_NEXT,"connect");
-
-    char canon[INET6_ADDRSTRLEN];
-    getnameinfo(sa, len, canon, sizeof canon,
-                NULL, 0, NI_NUMERICHOST | NI_NUMERICSERV);
-
-    char plain[INET6_ADDRSTRLEN];
-    if (from_canonical(canon, plain) != 0)
-        strcpy(plain, canon);
-
-    if (ip_set_contains(plain) || ip_allowed(plain))
-        return real_conn(fd, sa, len);
-
-
-    fprintf(stderr,"netblocker: BLOCK CONNECT %s\n", plain);
-    errno = EACCES;
-    return -1;
+static void reload_rules(void) {
+  pthread_rwlock_wrlock( & rules_lock);
+  free_rules();
+  load_rules_inner();
+  ip_cache_clear();
+  pthread_rwlock_unlock( & rules_lock);
+}
+static void hup_handler(int s) {
+  (void) s;
+  reload_rules();
 }
 
-/* -------------- constructor: init once --------------- */
-__attribute__((constructor))
-static void init_netblocker(void) {
-    load_rules();
-    real_gai   = (orig_getaddrinfo_f)dlsym(RTLD_NEXT,"getaddrinfo");
-    real_conn  = (orig_connect_f)   dlsym(RTLD_NEXT,"connect");
+/*=======================  Evaluation  =======================*/
+
+static int host_match(const char * h,
+  const rule_t * r) {
+  if (!strcasecmp(r -> host, "*")) return (r -> port == 0);
+  if (r -> host[0] == '*' && r -> host[1] == '.') {
+    size_t hl = strlen(h), sl = strlen(r -> host + 1);
+    return hl >= sl && !strcasecmp(h + hl - sl, r -> host + 1);
+  }
+  return !strcasecmp(h, r -> host);
+}
+
+static int host_allowed(const char * h, unsigned short port) {
+  pthread_rwlock_rdlock( & rules_lock);
+  for (rule_t * r = rules; r; r = r -> next) {
+    if (r -> cidr_bits) continue;
+    if ((!r -> port || r -> port == port || port == 0) && host_match(h, r)) {
+      pthread_rwlock_unlock( & rules_lock);
+      return 1;
+    }
+  }
+  pthread_rwlock_unlock( & rules_lock);
+  return 0;
+}
+
+static int ip_allowed(const char * ip, unsigned short port) {
+  if (ip_cache_contains(ip, port)) return 1;
+  struct in6_addr a6;
+  if (to_canon(ip, NULL, & a6) != 0) return 0;
+  pthread_rwlock_rdlock( & rules_lock);
+  for (rule_t * r = rules; r; r = r -> next) {
+    if (r -> port && r -> port != port) continue;
+    if (!r -> cidr_bits) {
+      if (!strcasecmp(r -> host, "*")) {
+        pthread_rwlock_unlock( & rules_lock);
+        return 1;
+      }
+      if ((strchr(r -> host, '.') || strchr(r -> host, ':')) && !strcasecmp(r -> host, ip)) {
+        pthread_rwlock_unlock( & rules_lock);
+        return 1;
+      }
+      continue;
+    }
+    if (cidr_match( & a6, & r -> net6, r -> cidr_bits)) {
+      pthread_rwlock_unlock( & rules_lock);
+      return 1;
+    }
+  }
+  pthread_rwlock_unlock( & rules_lock);
+  return 0;
+}
+
+/*=======================  Hooks  ============================*/
+
+typedef int( * gai_f)(const char * ,
+  const char * ,
+    const struct addrinfo * , struct addrinfo ** );
+typedef int( * conn_f)(int,
+  const struct sockaddr * , socklen_t);
+static gai_f real_gai = NULL;
+static conn_f real_conn = NULL;
+
+int getaddrinfo(const char * node,
+  const char * svc,
+    const struct addrinfo * hints, struct addrinfo ** res) {
+  if (!real_gai) real_gai = (gai_f) dlsym(RTLD_NEXT, "getaddrinfo");
+  unsigned short svc_port = 0;
+  if (svc) {
+    char * end;
+    unsigned long p = strtoul(svc, & end, 10);
+    if (! * end && p <= 65535) svc_port = (unsigned short) p;
+  }
+  if (node && !host_allowed(node, svc_port)) return EAI_FAIL;
+  int rc = real_gai(node, svc, hints, res);
+  if (rc == 0 && node && host_allowed(node, svc_port)) {
+    for (struct addrinfo * ai = * res; ai; ai = ai -> ai_next) {
+      char buf[INET6_ADDRSTRLEN] = "";
+      getnameinfo(ai -> ai_addr, ai -> ai_addrlen, buf, sizeof buf, NULL, 0, NI_NUMERICHOST);
+      unsigned short ptmp = svc_port;
+      if (!ptmp) {
+        if (ai -> ai_family == AF_INET) ptmp = ntohs(((struct sockaddr_in * ) ai -> ai_addr) -> sin_port);
+        else if (ai -> ai_family == AF_INET6) ptmp = ntohs(((struct sockaddr_in6 * ) ai -> ai_addr) -> sin6_port);
+      }
+      ip_cache_insert(buf, ptmp);
+    }
+  }
+  return rc;
+}
+
+int connect(int fd,
+  const struct sockaddr * sa, socklen_t len) {
+  if (!real_conn) real_conn = (conn_f) dlsym(RTLD_NEXT, "connect");
+  char ip[INET6_ADDRSTRLEN] = "";
+  unsigned short port = 0;
+  if (sa -> sa_family == AF_INET) {
+    const struct sockaddr_in * s = (const struct sockaddr_in * ) sa;
+    inet_ntop(AF_INET, & s -> sin_addr, ip, sizeof ip);
+    port = ntohs(s -> sin_port);
+  } else if (sa -> sa_family == AF_INET6) {
+    const struct sockaddr_in6 * s6 = (const struct sockaddr_in6 * ) sa;
+    inet_ntop(AF_INET6, & s6 -> sin6_addr, ip, sizeof ip);
+    port = ntohs(s6 -> sin6_port);
+  }
+  if (ip_allowed(ip, port)) return real_conn(fd, sa, len);
+  errno = EACCES;
+  return -1;
+}
+
+__attribute__((constructor)) static void nb_init(void) {
+  reload_rules();
+  signal(SIGHUP, hup_handler);
+  real_gai = (gai_f) dlsym(RTLD_NEXT, "getaddrinfo");
+  real_conn = (conn_f) dlsym(RTLD_NEXT, "connect");
 }

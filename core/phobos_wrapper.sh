@@ -64,6 +64,7 @@ allowed_file=$(mktemp "${workdir}/allowedList.XXXX.cfg")
 : > "$allowed_file"
 bwrap_args+=( --ro-bind "$allowed_file" "$allowed_file" )
 export NETBLOCKER_CONF="$allowed_file"
+export LD_PRELOAD="/opt/ld_preloader/libnetblocker.so"
 
 
 [[ -n ${tail_cfg:-} && -f $tail_cfg ]] && while read -r f || [[ -n $ln ]]; do bwrap_args+=("$f"); done < "$tail_cfg"
