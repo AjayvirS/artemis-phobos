@@ -9,7 +9,9 @@ EOF
 exit 1; }
 
 workdir="$PWD"; code_lang="java"
-base_cfg="$workdir/BaseStatic.cfg"; extra_cfgs=("$workdir/BasePhobos.cfg"); tail_cfg="$workdir/TailStatic.cfg"
+core="/opt/core"
+base_cfg="$core/BaseStatic.cfg"; extra_cfgs=("$core/BasePhobos.cfg"); tail_cfg="$core/TailStatic.cfg"
+
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -22,12 +24,11 @@ while [[ $# -gt 0 ]]; do
     *) usage;;
   esac
 done
-[[ -z ${base_cfg:-} ]] && usage
 
-repo_root="/opt/test-repository/${code_lang}"
-cd "$repo_root" || err "cannot cd to $repo_root"
-[[ $workdir == $PWD ]] && workdir="$repo_root"
-build_script="$repo_root/build_script.sh"; shift
+[[ -z ${base_cfg:-} ]] && usage
+[[ $# -eq 0 ]] && err "missing build script"
+build_script="/opt/test-repository/$code_lang/build_script.sh"; shift
+
 
 readonly_paths=() write_paths=() tmpfs_paths=() network_rules=()
 timeout_s=0 mem_mb=0
@@ -60,11 +61,11 @@ for p in "${readonly_paths[@]}"; do bwrap_args+=( --ro-bind "$p" "$p" ); done
 for p in "${write_paths[@]}";    do bwrap_args+=( --bind    "$p" "$p" ); done
 for p in "${tmpfs_paths[@]}";    do bwrap_args+=( --tmpfs   "$p"     ); done
 
-allowed_file=$(mktemp "${workdir}/allowedList.XXXX.cfg")
+allowed_file=$(mktemp "$core/allowedList.XXXX.cfg")
 : > "$allowed_file"
 bwrap_args+=( --ro-bind "$allowed_file" "$allowed_file" )
 export NETBLOCKER_CONF="$allowed_file"
-export LD_PRELOAD="${workdir}/libnetblocker.so"
+export LD_PRELOAD="$core/libnetblocker.so"
 
 [[ -n ${tail_cfg:-} && -f $tail_cfg ]] && while read -r f || [[ -n $f ]]; do
                                               read -ra parts <<<"$f"
@@ -82,8 +83,7 @@ done
 
 rlimit_arg=(); [[ $mem_mb -gt 0 ]] && rlimit_arg=( --rlimit-as=$((mem_mb*1024*1024)) )
 timeout_cmd=( timeout --kill-after=5s "${timeout_s}s" )
-[[ -x $build_script ]] || err "build script not found or not executable: $build_script"
 
-cmd=( "${timeout_cmd[@]}" bwrap "${bwrap_args[@]}" -- "$build_script" "$@" )
+cmd=( "${timeout_cmd[@]}" bwrap "${bwrap_args[@]}" -- $build_script "$@" )
 printf '\e[34m[bwrap]\e[0m '; printf '%q ' "${cmd[@]}"; echo
 exec "${cmd[@]}"
