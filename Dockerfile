@@ -26,3 +26,4 @@ USER sandboxuser
 
 ENTRYPOINT ["/opt/core/phobos_wrapper.sh", "-b", "/opt/core/BaseStatic.cfg", "-e", "/opt/core/BasePhobos.cfg", "-t", "/opt/core/TailStatic.cfg", "--", "build_script.sh"]
 # CMD ["/bin/bash"]
+
