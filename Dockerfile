@@ -26,7 +26,7 @@ RUN chmod +x /opt/core/phobos_wrapper.sh \
              /opt/core/*.cfg
 
 RUN gcc -shared -fPIC -ldl -o /opt/core/libnetblocker.so /opt/ld_preloader/netblocker.c
-
+RUN rm -rf /opt/ld_preloader
 
 ENV PATH=/opt/core:$PATH
 
