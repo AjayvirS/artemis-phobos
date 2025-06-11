@@ -47,4 +47,10 @@ class PhobosAccessTest {
         assertTrue(phobos.tryExec("/bin/echo", "hello"),
                 "'echo' should still work");
     }
+
+    @Test
+    void attemptCreateDirectoryMustFail() {
+        boolean ok = phobos.tryExec("mkdir", "/opt/core/unaouthorised_dir");
+        assertFalse(ok, "Creating a directory should not be allowed");
+    }
 }
