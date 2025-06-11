@@ -1,18 +1,23 @@
 plugins {
-    id 'groovy'
 }
 
-group = 'org.example'
-version = '1.0-SNAPSHOT'
+apply plugin: 'java'
+sourceCompatibility = 17
+version = '1.0.0'
+compileJava.options.encoding = 'UTF-8'
+compileTestJava.options.encoding = 'UTF-8'
 
 repositories {
     mavenCentral()
+    mavenLocal()
 }
 
 dependencies {
-    implementation 'org.apache.groovy:groovy:4.0.14'
-    testImplementation platform('org.junit:junit-bom:5.10.0')
-    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'de.tum.in.ase:artemis-java-test-sandbox:1.13.0'
+    implementation 'org.apache.commons:commons-lang3:3.13.0'
+
+    // testImplementation(':T01E01---Calculator')
+    // testImplementation(':T01E01---Calculator-Solution')
 }
 
 def assignmentSrcDir = "assignment/src"
@@ -39,6 +44,57 @@ sourceSets {
     }
 }
 
+def forbiddenPackageFolders = [ //(2)
+                                "$studentOutputDir/ch/qos/logback/",
+                                "$studentOutputDir/com/github/javaparser/",
+                                "$studentOutputDir/com/intellij/",
+                                "$studentOutputDir/com/sun/",
+                                "$studentOutputDir/de/tum/in/test/api/",
+                                "$studentOutputDir/java/",
+                                "$studentOutputDir/javax/",
+                                "$studentOutputDir/jdk/",
+                                "$studentOutputDir/net/jqwik/",
+                                "$studentOutputDir/org/assertj/",
+                                "$studentOutputDir/org/apache/",
+                                "$studentOutputDir/org/eclipse/",
+                                "$studentOutputDir/org/gradle/",
+                                "$studentOutputDir/org/jacoco/",
+                                "$studentOutputDir/org/json/",
+                                "$studentOutputDir/org/junit/",
+                                "$studentOutputDir/org/opentest4j/",
+                                "$studentOutputDir/sun/",
+                                "$studentOutputDir/worker/org/gradle/"
+]
 test {
+    doFirst { //(1)
+        for (String packageFolder in forbiddenPackageFolders) {
+            assert !file(packageFolder).exists(): "$packageFolder must not exist within the submission."
+        }
+    }
+    defaultCharacterEncoding = 'UTF-8'
+    testLogging {
+        showStandardStreams = true
+        events "started", "passed", "failed", "skipped"
+    }
+
+    afterTest { desc, result ->
+        if (result.resultType == TestResult.ResultType.SUCCESS) {
+            println "✔  ${desc.className}.${desc.name} PASSED"
+        }
+    }
+
+    afterSuite { desc, result ->
+        if (!desc.parent)
+            println("${result.resultType} " +
+                    "(${result.testCount} tests, " +
+                    "${result.successfulTestCount} successes, " +
+                    "${result.failedTestCount} failures, " +
+                    "${result.skippedTestCount} skipped)")
+    }
+
     useJUnitPlatform()
 }
+
+
+
+

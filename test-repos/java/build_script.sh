@@ -4,7 +4,7 @@ set -e
 gradle () {
   echo '⚙️ executing gradle'
   # chmod +x ./gradlew
-  ./gradlew clean test
+  ./gradlew clean test --info
 }
 
 main () {

@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   phobos-runner:
     build:
@@ -7,6 +5,11 @@ services:
       dockerfile: Dockerfile
 
     security_opt:
-      - "seccomp:./seccomp_allow_bwrap.json"
+      - "seccomp:./assets/seccomp_allow_bwrap.json"
 
-
+    stdin_open: true
+    tty: true
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - "exec /bin/bash"

@@ -32,8 +32,7 @@ typedef struct rule {
   int cidr_bits; /* 0 ⇒ host/IP rule                       */
   unsigned short port; /* 0 ⇒ any port                           */
   struct rule * next;
-}
-rule_t;
+} rule_t;
 
 static rule_t * rules = NULL;
 static pthread_rwlock_t rules_lock = PTHREAD_RWLOCK_INITIALIZER;
@@ -44,24 +43,26 @@ typedef struct ip_node {
   char ip[INET6_ADDRSTRLEN];
   unsigned short port;
   struct ip_node * next;
-}
-ip_t;
+} ip_t;
 static ip_t * ip_cache = NULL;
 static size_t ip_cache_sz = 0;
-static
-const size_t IP_CACHE_MAX = 1024;
+static const size_t IP_CACHE_MAX = 1024;
 static pthread_mutex_t ip_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static int ip_cache_contains(const char * ip, unsigned short port) {
-  pthread_mutex_lock( & ip_lock);
-  for (ip_t * n = ip_cache; n; n = n -> next)
-    if (!strcasecmp(n -> ip, ip) && (n -> port == 0 || n -> port == port)) {
-      pthread_mutex_unlock( & ip_lock);
-      return 1;
+static int ip_cache_contains(const char *ip, unsigned short port)
+{
+    pthread_mutex_lock(&ip_lock);
+    for (ip_t *n = ip_cache; n; n = n->next) {
+        if (!strcasecmp(n->ip, ip) &&
+            (n->port == 0 || port == 0 || n->port == port)) {
+            pthread_mutex_unlock(&ip_lock);
+            return 1;
+        }
     }
-  pthread_mutex_unlock( & ip_lock);
-  return 0;
+    pthread_mutex_unlock(&ip_lock);
+    return 0;
 }
+
 
 static void ip_cache_insert(const char * ip, unsigned short port) {
   if (ip_cache_contains(ip, port)) return;
@@ -219,32 +220,86 @@ static int host_allowed(const char * h, unsigned short port) {
   return 0;
 }
 
-static int ip_allowed(const char * ip, unsigned short port) {
-  if (ip_cache_contains(ip, port)) return 1;
-  struct in6_addr a6;
-  if (to_canon(ip, NULL, & a6) != 0) return 0;
-  pthread_rwlock_rdlock( & rules_lock);
-  for (rule_t * r = rules; r; r = r -> next) {
-    if (r -> port && r -> port != port) continue;
-    if (!r -> cidr_bits) {
-      if (!strcasecmp(r -> host, "*")) {
-        pthread_rwlock_unlock( & rules_lock);
+static int ip_allowed(const char *ip, unsigned short port)
+{
+    if (ip_cache_contains(ip, port))
         return 1;
-      }
-      if ((strchr(r -> host, '.') || strchr(r -> host, ':')) && !strcasecmp(r -> host, ip)) {
-        pthread_rwlock_unlock( & rules_lock);
-        return 1;
-      }
-      continue;
+
+    /* normalise caller-supplied IP into v6 canonical form */
+    struct in6_addr a6;
+    char canon_ip[INET6_ADDRSTRLEN] = "";
+    if (to_canon(ip, canon_ip, &a6) != 0)
+        return 0;
+
+    pthread_rwlock_rdlock(&rules_lock);
+
+    /* ---------- 1st pass: literal & CIDR rules ---------- */
+    for (rule_t *r = rules; r; r = r->next) {      /*  ◀─ r declared here */
+        if (r->port && r->port != port)
+            continue;
+
+        /* literal host/IP rule (cidr_bits == 0) */
+        if (!r->cidr_bits) {
+            /* accept wildcard “*” (all hosts) */
+            if (!strcasecmp(r->host, "*")) {
+                pthread_rwlock_unlock(&rules_lock);
+                return 1;
+            }
+
+            /* exact-IP rule — compare canonical forms */
+            if ((strchr(r->host, '.') || strchr(r->host, ':'))) {
+                char canon_rule[INET6_ADDRSTRLEN] = "";
+                struct in6_addr rule6;
+                if (to_canon(r->host, canon_rule, &rule6) == 0 &&
+                    memcmp(&a6, &rule6, sizeof a6) == 0) {
+                    pthread_rwlock_unlock(&rules_lock);
+                    return 1;
+                }
+            }
+            continue;   /* literal host names handled later */
+        }
+
+        /* CIDR rule */
+        if (cidr_match(&a6, &r->net6, r->cidr_bits)) {
+            pthread_rwlock_unlock(&rules_lock);
+            return 1;
+        }
     }
-    if (cidr_match( & a6, & r -> net6, r -> cidr_bits)) {
-      pthread_rwlock_unlock( & rules_lock);
-      return 1;
+
+    /* ---------- 2nd pass: wildcard host back-fill ---------- */
+    for (rule_t *r = rules; r; r = r->next) {
+        if (r->cidr_bits ||
+            r->host[0] != '*' || r->host[1] != '.' ||
+            (r->port && r->port != port))
+            continue;
+
+        /* strip leading "*." */
+        const char *suffix = r->host + 1;
+        struct addrinfo *res = NULL;
+
+        if (getaddrinfo(suffix, NULL, NULL, &res) == 0) {
+            for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+                char buf[INET6_ADDRSTRLEN] = "";
+                getnameinfo(ai->ai_addr, ai->ai_addrlen,
+                            buf, sizeof buf, NULL, 0, NI_NUMERICHOST);
+
+                /* cache each discovered IP for speed */
+                ip_cache_insert(buf, r->port);
+
+                if (!strcasecmp(buf, canon_ip)) {
+                    freeaddrinfo(res);
+                    pthread_rwlock_unlock(&rules_lock);
+                    return 1;            /* match found */
+                }
+            }
+            freeaddrinfo(res);
+        }
     }
-  }
-  pthread_rwlock_unlock( & rules_lock);
-  return 0;
+
+    pthread_rwlock_unlock(&rules_lock);
+    return 0;   /* no rule matched */
 }
+
 
 /*=======================  Hooks  ============================*/
 
