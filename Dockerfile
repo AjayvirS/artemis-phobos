@@ -23,7 +23,9 @@ COPY ld_preloader/netblocker.c /opt/ld_preloader/
 
 RUN chown -R sandboxuser:sandboxuser /opt
 RUN chmod +x /opt/core/phobos_wrapper.sh \
-             /opt/core/*.cfg
+             /opt/core/*.cfg \
+             /opt/test-repository/java/build_script.sh \
+             /opt/test-repository/java/gradlew
 
 RUN gcc -shared -fPIC -ldl -o /opt/core/libnetblocker.so /opt/ld_preloader/netblocker.c
 RUN rm -rf /opt/ld_preloader
@@ -31,6 +33,8 @@ RUN rm -rf /opt/ld_preloader
 ENV PATH=/opt/core:$PATH
 
 USER sandboxuser
+
+
 
 #ENTRYPOINT ["/opt/core/phobos_wrapper.sh", "-b", "/opt/core/BaseStatic.cfg", "-e", "/opt/core/BasePhobos.cfg", "-t", "/opt/core/TailStatic.cfg", "--", "build_script.sh"]
 #CMD ["/bin/bash"]

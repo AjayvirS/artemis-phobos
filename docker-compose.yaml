@@ -6,7 +6,7 @@ services:
 
     security_opt:
       - "seccomp:./assets/seccomp_allow_bwrap.json"
-
+      - "apparmor=docker-bwrap"
     stdin_open: true
     tty: true
     entrypoint: /bin/bash
