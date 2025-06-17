@@ -16,7 +16,7 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 PROFILE_SRC="$PROJECT_ROOT/security_config/docker-bwrap"
-PROFILE_DST="/etc/apparmor.d/docker-bwrap"
+PROFILE_DST="/etc/apparmor.d/docker-bwrap" # Path to the AppArmor profile
 
 echo "Loading AppArmor profile…"
 if [[ ! -f "$PROFILE_SRC" ]]; then
