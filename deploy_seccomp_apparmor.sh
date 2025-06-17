@@ -15,19 +15,20 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
-PROFILE_SRC="$PROJECT_ROOT/security_config/docker-bwrap"
-PROFILE_DST="/etc/apparmor.d/docker-bwrap" # Path to the AppArmor profile
+APPARMOR_PROFILE_SRC="$PROJECT_ROOT/security_config/apparmor_allow_bwrap"
+APPARMOR_PROFILE_DST="/etc/apparmor.d/docker-bwrap"
+
 
 echo "Loading AppArmor profile…"
-if [[ ! -f "$PROFILE_SRC" ]]; then
-  echo "$PROFILE_SRC not found" >&2
+if [[ ! -f "$APPARMOR_PROFILE_SRC" ]]; then
+  echo "$APPARMOR_PROFILE_SRC not found" >&2
   exit 1
 fi
 
-if ! sudo cmp -s "$PROFILE_SRC" "$PROFILE_DST" 2>/dev/null; then
-  echo "Installing/Updating $PROFILE_DST"
-  sudo install -m 644 -D "$PROFILE_SRC" "$PROFILE_DST"
-  sudo apparmor_parser -Kr "$PROFILE_DST"
+if ! sudo cmp -s "$APPARMOR_PROFILE_SRC" "$APPARMOR_PROFILE_DST" 2>/dev/null; then
+  echo "Installing/Updating $APPARMOR_PROFILE_DST"
+  sudo install -m 644 -D "$APPARMOR_PROFILE_SRC" "$APPARMOR_PROFILE_DST"
+  sudo apparmor_parser -Kr "$APPARMOR_PROFILE_DST"
 else
   echo "Profile already up-to-date; skipping reload"
 fi
