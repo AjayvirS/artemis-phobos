@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
 
     security_opt:
-      - "seccomp:./assets/seccomp_allow_bwrap.json"
+      - "seccomp:./security_config/seccomp_allow_bwrap.json"
       - "apparmor=docker-bwrap"
     stdin_open: true
     tty: true
