@@ -14,8 +14,8 @@ class PhobosAccessTest {
 
     @Test
     void writeToCoreMustFail() {
-        boolean ok = phobos.attemptWrite("/opt/core/notauthorised.txt", "forbidden");
-        assertFalse(ok, "Write into /opt/core should remain blocked");
+        boolean ok = phobos.attemptWrite("/var/tmp/opt/core/notauthorised.txt", "forbidden");
+        assertFalse(ok, "Write into /var/tmp/opt/core should remain blocked");
     }
 
     @Test
@@ -50,7 +50,7 @@ class PhobosAccessTest {
 
     @Test
     void attemptCreateDirectoryMustFail() {
-        boolean ok = phobos.tryExec("mkdir", "/opt/core/unaouthorised_dir");
+        boolean ok = phobos.tryExec("mkdir", "/var/tmp/opt/core/unaouthorised_dir");
         assertFalse(ok, "Creating a directory should not be allowed");
     }
 }

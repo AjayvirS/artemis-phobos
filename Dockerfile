@@ -2,37 +2,25 @@ FROM ls1tum/artemis-maven-template:java17-22 AS base
 
 
 RUN apt-get update && apt-get install -y \
-        build-essential \
-        gcc \
-        libssl-dev \
-        libnl-3-dev \
-    strace \
     bubblewrap \
     tree \
   && rm -rf /var/lib/apt/lists/*
 
 
-RUN useradd -m sandboxuser
+# RUN useradd -m sandboxuser
 
-RUN mkdir -p /opt/core
-COPY core/phobos_wrapper.sh                 /opt/core/
-COPY ld_preloader/libnetblocker.so                  /opt/core/
-COPY core/*.cfg                     /opt/core/
-COPY test-repos                     /opt/test-repository/
-COPY ld_preloader/netblocker.c /opt/ld_preloader/
+RUN mkdir -p /var/tmp/opt/core
+COPY core/phobos_wrapper.sh                 /var/tmp/opt/core/
+COPY ld_preloader/libnetblocker.so                  /var/tmp/opt/core/
+COPY core/remote/*.cfg                     /var/tmp/opt/core/
 
-RUN chown -R sandboxuser:sandboxuser /opt
-RUN chmod +x /opt/core/phobos_wrapper.sh \
-             /opt/core/*.cfg \
-             /opt/test-repository/java/build_script.sh \
-             /opt/test-repository/java/gradlew
+# RUN chown -R sandboxuser:sandboxuser /var/tmp
+RUN chmod +x /var/tmp/opt/core/phobos_wrapper.sh \
+             /var/tmp/opt/core/*.cfg
 
-RUN gcc -shared -fPIC -ldl -o /opt/core/libnetblocker.so /opt/ld_preloader/netblocker.c
-RUN rm -rf /opt/ld_preloader
+ENV PATH=/var/tmp/opt/core:$PATH
 
-ENV PATH=/opt/core:$PATH
-
-USER sandboxuser
+# USER sandboxuser
 
 
 

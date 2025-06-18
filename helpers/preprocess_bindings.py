@@ -79,7 +79,7 @@ paths_file.write_text("\n".join(sorted(set(dyn_lines))) + "\n")
 print("wrote", paths_file)
 
 # Ensure /opt/core exists
-core_dir = pathlib.Path("/opt/core")
+core_dir = pathlib.Path("/var/tmp/opt/core")
 core_dir.mkdir(parents=True, exist_ok=True)
 
 # 2) base_static.cfg in /opt/core

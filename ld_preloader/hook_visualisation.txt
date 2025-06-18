@@ -1,5 +1,5 @@
 fork()
-execve("./buildScript.sh", …, env = {"LD_PRELOAD=/opt/netblocker/libnetblocker.so", …})
+execve("./buildScript.sh", …, env = {"LD_PRELOAD=/var/tmp/opt/netblocker/libnetblocker.so", …})
 
 ┌─ kernel ────────────────────────────────────────────────────────────┐
 │ 1.  Maps the dynamic linker (ld-linux.so)                          │

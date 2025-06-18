@@ -19,12 +19,12 @@ fi
 lang="$1"
 
 
-BASE_EX_ROOT="/opt/student-exercises"
-TEST_REPO="/opt/test-repository/$lang"
-PRUNE_SCRIPT="/opt/pruning/detect_minimal_fs.sh"
+BASE_EX_ROOT="/var/tmp/opt/student-exercises"
+TEST_REPO="/var/tmp/opt/test-repository/$lang"
+PRUNE_SCRIPT="/var/tmp/opt/pruning/detect_minimal_fs.sh"
 BUILD_SCRIPT="$TEST_REPO/build_script.sh"
-OUTPUT_DIR="/opt/bindings-results"
-PATH_SETS="/opt/path_sets"
+OUTPUT_DIR="/var/tmp/opt/bindings-results"
+PATH_SETS="/var/tmp/opt/path_sets"
 
 EX_ROOT="$BASE_EX_ROOT/$lang"
 
@@ -47,7 +47,7 @@ for ex_dir in "$EX_ROOT"/*; do
   rm -rf "$TARGET_SRC"
   mkdir -p "$TARGET_SRC"
   cp -r "$ex_dir/src/"* "$TARGET_SRC/"
-  cd "/opt"
+  cd "/var/tmp/opt"
 
   pushd "$TEST_REPO" >/dev/null
 
@@ -73,7 +73,7 @@ for ex_dir in "$EX_ROOT"/*; do
   mv "$TEST_REPO/final_bwrap.sh" \
      "$OUTPUT_DIR/final_bwrap_${lang}_${ex_name}.sh"
 
-  python3 /opt/helpers/preprocess_bindings.py \
+  python3 /var/tmp/opt/helpers/preprocess_bindings.py \
       "$OUTPUT_DIR/final_bindings_${lang}_${ex_name}.txt" \
       "$lang" "$ex_name" "$PATH_SETS"
 

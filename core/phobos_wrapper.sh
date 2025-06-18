@@ -12,7 +12,7 @@ exit 1; }
 # ---------------------------------------------------------------------
 PWD_ORIG=$PWD
 code_lang=java
-core=/opt/core
+core=/var/tmp/opt/core
 
 base_cfg="$core/BaseStatic.cfg"
 extra_cfgs=("$core/BasePhobos.cfg")
@@ -37,7 +37,7 @@ if [[ $# -gt 0 ]]; then                # user provided script after "--"
     build_script="$1"; shift
     [[ -f $build_script ]] || err "build script not found: $build_script"
 else                                   # fallback to default in repo
-    build_script="/opt/test-repository/$code_lang/build_script.sh"
+    build_script="/var/tmp/script.sh"
     [[ -f $build_script ]] || err "default build script missing: $build_script"
 fi
 

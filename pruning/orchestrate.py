@@ -4,8 +4,8 @@ orchestrate.py  –  one command to prune, merge & build all languages.
 Usage
     ./orchestrate.py
         --langs       java,python,c
-        --ex-root     /opt/student-exercises
-        --repo-root   /opt/test-repository
+        --ex-root     /var/tmp/opt/student-exercises
+        --repo-root   /var/tmp/opt/test-repository
         --path-dir    /opt/path_sets
         --jobs        4
         [--skip-prune]              # debug: reuse existing bindings
@@ -24,9 +24,9 @@ p = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter,
                             description=__doc__)
 p.add_argument('--langs',      required=True,
                help='comma-separated list, e.g. java,python,c')
-p.add_argument('--ex-root',    default='/opt/student-exercises')
-p.add_argument('--repo-root',  default='/opt/test-repository')
-p.add_argument('--path-dir',   default='/opt/path_sets')
+p.add_argument('--ex-root',    default='/var/tmp/opt/student-exercises')
+p.add_argument('--repo-root',  default='/var/tmp/opt/test-repository')
+p.add_argument('--path-dir',   default='/var/tmp/opt/path_sets')
 p.add_argument('--jobs',       type=int, default=os.cpu_count() or 4)
 p.add_argument('--skip-prune', action='store_true',
                help='skip run_minimal_fs_all (re-use old *.paths)')
@@ -41,7 +41,7 @@ ex_root   = Path(args.ex_root)
 repo_root = Path(args.repo_root)
 path_dir  = Path(args.path_dir)
 path_dir.mkdir(parents=True, exist_ok=True)
-core_dir = Path("/opt/core")
+core_dir = Path("/var/tmp/opt/core")
 
 # ───────────────────── helper wrappers ──────────────────
 def runcmd(cmd:str | List[str], name:str) -> None:
@@ -61,7 +61,7 @@ def process_language(lang:str) -> bool:
     """Prune all exercises & build lang-level sets. Returns True if path sets created, False if skipped."""
     if not args.skip_prune:
         prune_cmd = [
-            '/opt/pruning/run_minimal_fs_all.sh',
+            '/var/tmp/opt/pruning/run_minimal_fs_all.sh',
         ]
         if args.verbose:
             prune_cmd.append('--verbose')
@@ -74,7 +74,7 @@ def process_language(lang:str) -> bool:
 
     langsets_cmd = [
         'python3',
-        '/opt/helpers/make_lang_sets.py',
+        '/var/tmp/opt/helpers/make_lang_sets.py',
     ]
 
     langsets_cmd.extend([lang, str(path_dir)])
@@ -100,7 +100,7 @@ with ThreadPoolExecutor(max_workers=args.jobs) as pool:
             sys.exit(1)
 
 # ─────────── merge across languages once per-language sets are done ──
-merge_cmd = ['python3', '/opt/helpers/make_all_lang_sets.py', '--input-dir', str(path_dir), '--output-dir', str(core_dir)]
+merge_cmd = ['python3', '/var/tmp/opt/helpers/make_all_lang_sets.py', '--input-dir', str(path_dir), '--output-dir', str(core_dir)]
 
 merge_success = False
 try:

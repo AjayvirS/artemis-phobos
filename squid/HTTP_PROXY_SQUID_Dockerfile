@@ -16,13 +16,13 @@ RUN useradd -m sandboxuser
 
 
 
-ADD test-repos /opt/test-repository
-ADD student-exercises     /opt/student-exercises
+ADD test-repos /var/tmp/opt/test-repository
+ADD student-exercises     /var/tmp/opt/student-exercises
 
 COPY squid/squid.conf /etc/squid/squid.conf
-COPY pruning/detect_minimal_fs.sh /opt/detect_minimal_fs.sh
-COPY pruning/run_minimal_fs_all.sh  /opt/run_minimal_fs_all.sh
-COPY helpers  /opt/helpers
+COPY pruning/detect_minimal_fs.sh /var/tmp/opt/detect_minimal_fs.sh
+COPY pruning/run_minimal_fs_all.sh  /var/tmp/opt/run_minimal_fs_all.sh
+COPY helpers  /var/tmp/opt/helpers
 
 # Expose Squid’s proxy port (documentation only)
 # EXPOSE 3128
@@ -30,7 +30,7 @@ COPY helpers  /opt/helpers
 RUN mkdir -p /var/log/squid
 RUN chown -R sandboxuser:sandboxuser /opt
 RUN chown -R sandboxuser:sandboxuser /var/log/squid
-RUN chmod +x sandboxuser:sandboxuser /opt/*.sh
+RUN chmod +x sandboxuser:sandboxuser /var/tmp/opt/*.sh
 RUN squid -z
 
 ENV http_proxy=http://127.0.0.1:3128 https_proxy=http://127.0.0.1:3128
@@ -43,4 +43,4 @@ ENTRYPOINT []
 # Set the default command to run the bwrap script
 # CMD ["bash", "-c", "/opt/detect_minimal_fs.sh"]
 CMD ["/bin/bash"]
-# CMD ["/bin/bash","-c","/opt/detect_minimal_fs.sh --script /opt/build_script.sh --target /"]
+# CMD ["/bin/bash","-c","/var/tmp/opt/detect_minimal_fs.sh --script /var/tmp/opt/build_script.sh --target /"]
