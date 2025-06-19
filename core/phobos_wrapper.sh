@@ -24,7 +24,7 @@ while [[ $# -gt 0 ]]; do
     -e|--extra)  extra_cfgs+=("$PWD_ORIG/$2"); shift 2;;
     -t|--tail)   tail_cfg="$PWD_ORIG/$2"; shift 2;;
     -l|--lang)   code_lang="$2"; shift 2;;
-    -o|--output) workdir="$2"; shift 2;;           # kept for legacy callers
+    -o|--output) workdir="$2"; shift 2;;
     --)          shift; break;;
     *) usage;;
   esac
@@ -100,6 +100,7 @@ parse_hostport() {            # $1 = "host:port" (IPv6 ok)
 for rule in "${network_rules[@]}"; do
     [[ $rule =~ ^allow[[:space:]]+(.+)$ ]] || continue
     parse_hostport "${BASH_REMATCH[1]}" >> "$allowed_file"
+    echo "Added network rule: ${BASH_REMATCH[1]}" >&2
 done
 
 export NETBLOCKER_CONF="$allowed_file"

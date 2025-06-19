@@ -1,143 +1,160 @@
+#!/usr/bin/env python3
 """
-orchestrate.py  –  one command to prune, merge & build all languages.
+orchestrate.py  – one command to prune, merge & build all languages.
 
-Usage
-    ./orchestrate.py
-        --langs       java,python,c
-        --ex-root     /var/tmp/opt/student-exercises
-        --repo-root   /var/tmp/opt/test-repository
-        --path-dir    /opt/path_sets
-        --jobs        4
-        [--skip-prune]              # debug: reuse existing bindings
-        [--no-smoke]                # skip final phobos_wrapper call
-        [--verbose]                 # enable verbose logging for underlying scripts
+Example
+    ./orchestrate.py --langs java,python              \
+                     --ex-root   /opt/student-exercises \
+                     --repo-root /opt/test-repository   \
+                     --path-dir  /opt/path_sets         \
+                     --jobs 4
 """
 
 from __future__ import annotations
-import argparse, itertools, os, shlex, subprocess, sys, textwrap, time
+import argparse, os, shlex, subprocess, sys, textwrap, time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib        import Path
-from typing         import List
+from pathlib import Path
+from typing import Iterable, List
 
-# ───────────────────────── CLI ──────────────────────────
-p = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter,
-                            description=__doc__)
-p.add_argument('--langs',      required=True,
-               help='comma-separated list, e.g. java,python,c')
-p.add_argument('--ex-root',    default='/var/tmp/opt/student-exercises')
-p.add_argument('--repo-root',  default='/var/tmp/opt/test-repository')
-p.add_argument('--path-dir',   default='/var/tmp/opt/path_sets')
-p.add_argument('--jobs',       type=int, default=os.cpu_count() or 4)
-p.add_argument('--skip-prune', action='store_true',
-               help='skip run_minimal_fs_all (re-use old *.paths)')
-p.add_argument('--no-smoke',   action='store_true',
-               help="don't run phobos_wrapper smoke-test")
-p.add_argument('--verbose',    action='store_true',
-               help='enable verbose logging for underlying scripts')
-args = p.parse_args()
+# ───────────────────────────────────────────────────── CLI
+ap = argparse.ArgumentParser(
+    formatter_class=argparse.RawTextHelpFormatter,
+    description=textwrap.dedent(__doc__))
 
-langs     : List[str] = [l.strip() for l in args.langs.split(',') if l.strip()]
-ex_root   = Path(args.ex_root)
-repo_root = Path(args.repo_root)
-path_dir  = Path(args.path_dir)
-path_dir.mkdir(parents=True, exist_ok=True)
-core_dir = Path("/var/tmp/opt/core")
+ap.add_argument('--langs',      required=True,
+                help='comma-separated: java,python,c')
+ap.add_argument('--ex-root',    default='/opt/student-exercises')
+ap.add_argument('--repo-root',  default='/opt/test-repository')
+ap.add_argument('--path-dir',   default='/opt/path_sets')
+ap.add_argument('--jobs',       type=int, default=os.cpu_count() or 4)
+ap.add_argument('--skip-prune', action='store_true')
+ap.add_argument('--no-smoke',   action='store_true')
+ap.add_argument('--verbose',    action='store_true')
+args = ap.parse_args()
 
-# ───────────────────── helper wrappers ──────────────────
-def runcmd(cmd:str | List[str], name:str) -> None:
-    """Run shell-command, stream output, raise on non-zero exit."""
-    print(f'\033[34m[{name}]\033[0m', cmd if isinstance(cmd, str)
-    else ' '.join(shlex.quote(x) for x in cmd))
+langs      : List[str] = [l.strip() for l in args.langs.split(',') if l.strip()]
+EX_ROOT     = Path(args.ex_root)
+REPO_ROOT   = Path(args.repo_root)
+PATH_DIR    = Path(args.path_dir);  PATH_DIR.mkdir(parents=True, exist_ok=True)
+CORE_DIR    = Path('/opt/core');    CORE_DIR.mkdir(parents=True, exist_ok=True)
+
+# ────────────────────────────────────────── helpers
+def run(cmd: str | list[str], tag: str = '') -> None:
+    """Stream subprocess output, raise on non-zero exit."""
+    pretty = cmd if isinstance(cmd, str) else ' '.join(shlex.quote(c) for c in cmd)
+    print(f'\033[34m[{tag or "cmd"}]\033[0m', pretty)
     t0 = time.time()
-    proc = subprocess.run(cmd, shell=isinstance(cmd,str))
+    rc = subprocess.call(cmd, shell=isinstance(cmd, str))
     dt = time.time() - t0
-    if proc.returncode != 0:
-        print(f'\033[31m✗ {name} failed ({dt:.1f}s)\033[0m')
-        raise RuntimeError(f'{name} failed (rc={proc.returncode})')
-    print(f'\033[32m✓ {name} ok ({dt:.1f}s)\033[0m')
+    if rc:
+        raise RuntimeError(f'{tag} failed (rc={rc}, {dt:.1f}s)')
+    print(f'\033[32m✓ {tag} ({dt:.1f}s)\033[0m')
 
-# ───────────────────── processing per-language ────────────
-def process_language(lang:str) -> bool:
-    """Prune all exercises & build lang-level sets. Returns True if path sets created, False if skipped."""
-    if not args.skip_prune:
-        prune_cmd = [
-            '/var/tmp/opt/pruning/run_minimal_fs_all.sh',
-        ]
-        if args.verbose:
-            prune_cmd.append('--verbose')
-        prune_cmd.append(lang)
-        runcmd(prune_cmd, f'prune:{lang}')
-    lang_ex_dir = ex_root / lang
-    if not lang_ex_dir.exists() or not any(lang_ex_dir.iterdir()):
-        print(f'\033[33m[warning] No exercises found for {lang}, skipping language sets\033[0m')
-        return False
 
-    langsets_cmd = [
-        'python3',
-        '/var/tmp/opt/helpers/make_lang_sets.py',
-    ]
+# ────────────────────────────────────────── step 1 – prune ⟶ *.paths
+def prune_language(lang: str) -> Path:
+    """Return directory that now contains <lang>_*.paths; may be empty."""
+    if args.skip_prune:
+        print(f'[skip] prune:{lang}')
+        return PATH_DIR
 
-    langsets_cmd.extend([lang, str(path_dir)])
-    runcmd(langsets_cmd, f'merge:{lang}')
-    return True
+    cmd = ['/opt/pruning/run_minimal_fs_all.sh']
+    if args.verbose: cmd.append('--verbose')
+    cmd.append(lang)
+    run(cmd, f'prune:{lang}')
+    return PATH_DIR
 
-# ───────────────────── main orchestration ───────────────
-print('\n\033[1mLanguages:\033[0m', ', '.join(langs))
-print('Output path-sets: ', path_dir, '\n')
 
-# Track per-language status: True=sets created, False=skipped
-lang_status: dict[str, bool] = {}
+# ────────────────────────────────────────── step 2 – merge per language
+def make_lang_cfgs(lang: str) -> tuple[Path, Path]:
+    """
+    Create   <lang>_union.paths / <lang>_intersection.paths  →  BaseLanguage-*.cfg
+    Return (union_path, cfg_path).  If lang has no paths, returns (None, None).
+    """
+    union_file = PATH_DIR / f'{lang}_union.paths'
+    if not union_file.exists():
+        print(f'\033[33m[warn]\033[0m no *.paths for {lang}')
+        return None, None
+
+    # ---------- deduplicate & write BaseLanguage-<lang>.cfg
+    readonly: set[str] = set()
+    write   : set[str] = set()
+
+    for line in union_file.read_text().splitlines():
+        mode, path = line.split(maxsplit=1)
+        (write if mode == 'w' else readonly).add(path)
+
+    cfg_lines: list[str] = []
+    if readonly:
+        cfg_lines += ['[readonly]', *sorted(readonly), '']
+    if write:
+        cfg_lines += ['[write]',    *sorted(write),    '']
+
+    cfg_path = CORE_DIR / f'BaseLanguage-{lang}.cfg'
+    cfg_path.write_text('\n'.join(cfg_lines))
+    print('  • wrote', cfg_path.name)
+    return union_file, cfg_path
+
+
+# ────────────────────────────────────────── step 3 – merge all languages
+def make_base_phobos(all_union_files: Iterable[Path]) -> Path:
+    """Union of every lang’s union.paths  → BasePhobos.cfg (deduped)."""
+    readonly, write = set(), set()
+
+    for uf in all_union_files:
+        for line in uf.read_text().splitlines():
+            mode, path = line.split(maxsplit=1)
+            if mode == 'w':
+                write.add(path);  readonly.discard(path)     # write beats read
+            elif mode == 'r' and path not in write:
+                readonly.add(path)
+
+    lines = []
+    if readonly:
+        lines += ['[readonly]', *sorted(readonly), '']
+    if write:
+        lines += ['[write]',    *sorted(write),    '']
+
+    out = CORE_DIR / 'BasePhobos.cfg'
+    out.write_text('\n'.join(lines))
+    print('  • wrote', out.name)
+    return out
+
+
+# ────────────────────────────────────────── main pipeline
+print('\n\033[1mOrchestrating for:\033[0m', ', '.join(langs), '\n')
+
+lang_union_files: list[Path] = []
+fails: list[str] = []
+
 with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-    fut2lang = {pool.submit(process_language, lang): lang for lang in langs}
+    fut2lang = {pool.submit(prune_language, l): l for l in langs}
     for fut in as_completed(fut2lang):
         lang = fut2lang[fut]
         try:
-            result = fut.result()
-            lang_status[lang] = result
-        except Exception as e:
-            print(f'\033[31m{lang} failed:\033[0m', e)
-            pool.shutdown(wait=False, cancel_futures=True)
-            sys.exit(1)
+            fut.result()
+        except Exception as exc:
+            print(f'\033[31m{lang} prune failed:\033[0m', exc)
+            fails.append(lang)
 
-# ─────────── merge across languages once per-language sets are done ──
-merge_cmd = ['python3', '/var/tmp/opt/helpers/make_all_lang_sets.py', '--input-dir', str(path_dir), '--output-dir', str(core_dir)]
-
-merge_success = False
-try:
-    runcmd(merge_cmd, 'merge:all')
-    merge_success = True
-
-except Exception:
-    # merge:all failure will exit above, so this is unlikely reached
-    merge_success = False
-
-# ───────────── check for expected config files ─────────────
-base_static = core_dir / 'BaseStatic.cfg'
-base_phobos = core_dir / 'BasePhobos.cfg'
-tail_static = core_dir / 'TailStatic.cfg'
-
-# ──────────────── detailed summary ────────────────────────
-print('\n\033[1mSummary\033[0m')
-# Per-language summary
+# create CFG per language (union → cfg)
 for lang in langs:
-    status = lang_status.get(lang)
-    if status is True:
-        print(f'  \033[32m✓\033[0m [{lang}] Path sets created successfully')
-    else:
-        print(f'  \033[33m!\033[0m [{lang}] No exercises found; skipped')
+    if lang in fails: continue
+    union, _cfg = make_lang_cfgs(lang)
+    if union: lang_union_files.append(union)
 
-# Cross-language merge summary
-if merge_success:
-    print(f'  \033[32m✓\033[0m [merge:all] Cross-language merge succeeded')
+# combine everything → BasePhobos.cfg
+if lang_union_files:
+    make_base_phobos(lang_union_files)
 else:
-    print(f'  \033[31m✗\033[0m [merge:all] Cross-language merge failed')
+    print('\033[33m[warn]\033[0m nothing to merge into BasePhobos.cfg')
 
-# Config files existence
-for cfg in [('BaseStatic.cfg', base_static), ('BasePhobos.cfg', base_phobos), ('TailStatic.cfg', tail_static)]:
-    name, path = cfg
-    if path.exists():
-        print(f'  \033[32m✓\033[0m [{name}] Created: {path}')
-    else:
-        print(f'  \033[31m✗\033[0m [{name}] Missing: {path}')
+tail_src = PATH_DIR / 'TailStatic.cfg'
+tail_dst = CORE_DIR / 'TailStatic.cfg'
+if tail_src.exists():
+    tail_dst.write_text(tail_src.read_text())
+    print('  • copied TailStatic.cfg')
+else:
+    print('\033[33m[warn]\033[0m TailStatic.cfg missing in', PATH_DIR)
 
-print('\nAll done.')
+print('\n\033[1mDone.\033[0m')
