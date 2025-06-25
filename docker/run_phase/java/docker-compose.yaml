@@ -1,7 +1,7 @@
 services:
   phobos-runner:
     build:
-      context: .
+      context: ../../..
       dockerfile: Dockerfile
     image: ajayvir/phobos
     security_opt:

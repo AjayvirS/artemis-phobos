@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deploy.sh – loads the custom AppArmor profile, then runs docker-compose.
+# deploy_seccomp_apparmor.sh – loads the custom AppArmor profile, then runs docker-compose.yaml.
 #
 # Copies security_config/docker-bwrap into /etc/apparmor.d/docker-bwrap
 #   (only if changed) and reloads it via apparmor_parser.
@@ -8,7 +8,7 @@
 # Project Local Context:
 #   security_config/docker-bwrap
 #   security_config/seccomp_allow_bwrap.json
-#   docker-compose.yml
+#   docker-compose.yaml
 #   deploy.sh
 #
 

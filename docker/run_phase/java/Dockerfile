@@ -14,10 +14,10 @@ RUN useradd -m sandboxuser
 
 # Copy Phobos core files and configuration
 RUN mkdir -p /var/tmp/opt/core
-COPY core/phobos_wrapper.sh                 /var/tmp/opt/core/
-COPY core/libnetblocker.so                  /var/tmp/opt/core/
+COPY ../../../core/phobos_wrapper.sh                 /var/tmp/opt/core/
+COPY ../../../core/libnetblocker.so                  /var/tmp/opt/core/
 COPY core/remote/*.cfg                      /var/tmp/opt/core/
-COPY core/allowedList.cfg                   /var/tmp/opt/core/
+COPY ../../../core/allowedList.cfg                   /var/tmp/opt/core/
 #COPY test-repos/java                     /var/tmp/testing-dir/
 #COPY ld_preloader/netblocker.c /var/tmp/opt/ld_preloader/
 # RUN gcc -shared -fPIC -ldl -o /var/tmp/opt/core/libnetblocker.so /var/tmp/opt/ld_preloader/netblocker.c

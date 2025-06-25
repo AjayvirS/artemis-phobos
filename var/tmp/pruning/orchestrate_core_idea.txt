@@ -1,0 +1,27 @@
+┌────────────────────┐
+│ host filesystem    │
+│  /var/tmp/path_sets│  ← single bind-mount
+│  /var/tmp/testing-dir
+│  /var/tmp/opt/core │
+└────────┬───────────┘
+         │
+┌────────▼─────────┐     ┌────────▼─────────┐     ┌────────▼─────────┐
+│ python-env ctr   │     │ java-env ctr     │     │  c-env ctr       │
+│ pytest, pip, …   │     │ maven/gradle …   │     │ gcc, make, …     │
+│ runs prune:py    │     │ runs prune:java  │     │ runs prune:c     │
+└──────────────────┘     └──────────────────┘     └──────────────────┘
+
+
+    Every container mounts the same host directory (read-write) at
+    /var/tmp so they all see the same path_sets and opt/core.
+
+    The pruning script writes python_union.paths, java_union.paths, … into
+    that shared volume.
+
+    After all language containers finish, you run one instance of
+    orchestrate.py (either on the host or in a thin “control” container that
+    also binds /var/tmp).
+    -→ It sees a single directory full of *_union.paths and the workflow
+    doesn’t change.
+
+No cross-container network IPC, no docker cp, just a shared bind-mount.
