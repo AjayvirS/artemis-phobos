@@ -7,4 +7,5 @@ COPY ./orchestrate.py .
 COPY var/tmp/helpers/preprocess_bindings.py .
 COPY var/tmp/helpers/make_lang_sets.py .
 
-ENTRYPOINT ["python3", "orchestrate.py"]
+#ENTRYPOINT ["python3", "orchestrate.py"]
+ENTRYPOINT ["bin/bash"]

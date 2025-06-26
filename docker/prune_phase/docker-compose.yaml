@@ -2,17 +2,17 @@ services:
   prune_python:
     build: ./python
     volumes:
-      - path_sets:/var/tmp/path_sets
-      - opt:/var/tmp/opt/core
       - ../../var/tmp:/var/tmp
     command: ["--verbose", "--cache-dir", "/home/sandboxuser/.cache/pip", "python"]
 
-  prune_java:
-    build: ./java
-    volumes:
-      - path_sets:/var/tmp/path_sets
-      - ../../var/tmp:/var/tmp
-    command: ["--verbose", "--cache-dir", "/home/sandboxuser/.gradle", "java" ]
+# TODO: volumes for path_sets and opt/core need to be adjusted s.t. we can write to them
+#  prune_java:
+#    build: ./java
+#    volumes:
+#      - path_sets:/var/tmp/path_sets
+#      - opt:/var/tmp/opt/core
+#      - ../../var/tmp:/var/tmp
+#    command: ["--verbose", "--cache-dir", "/home/sandboxuser/.gradle", "java" ]
 
   prune_c:
     build: ./c
@@ -29,13 +29,13 @@ services:
     depends_on:
       prune_python:
         condition: service_completed_successfully
-      prune_java:
-        condition: service_completed_successfully
+#      prune_java:
+#        condition: service_completed_successfully
       prune_c:
         condition: service_completed_successfully
     command:
       [
-        "--langs", "java, python",
+        "--langs", "python",
         "--path-dir", "/var/tmp/path_sets", "--skip-prune"
       ]
 

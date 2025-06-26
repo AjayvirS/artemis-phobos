@@ -112,14 +112,14 @@ def preprocess_and_union() -> None:
     for src in glob.glob(str(PATH_DIR / "final_bindings_*.txt")):
         _, lang, rest = Path(src).stem.split('_', 2)   # crude but fine
         ex   = rest.replace("final_bindings_", "")
-        cmd  = ["python3", "/app/preprocess_bindings.py", src, lang, ex, str(PATH_DIR)]
+        cmd  = ["python3", "/workspace/preprocess_bindings.py", src, lang, ex, str(PATH_DIR)]
         run(cmd, f"preproc:{lang}:{ex}")
 
     # 2) per-language union / intersection
     for lang in langs:
         if not any(Path(PATH_DIR).glob(f"{lang}_*.paths")):
             continue
-        cmd = ["python3", "/app/make_lang_sets.py", lang, str(PATH_DIR)]
+        cmd = ["python3", "/workspace/make_lang_sets.py", lang, str(PATH_DIR)]
         run(cmd, f"langsets:{lang}")
 
 # ────────────────────────────────────────── writers
