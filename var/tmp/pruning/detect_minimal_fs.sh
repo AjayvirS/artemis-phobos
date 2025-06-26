@@ -96,6 +96,20 @@ BUILD_OPTS="${BUILD_OPTS:-}"
 ###############################################################################
 # 2) GLOBAL SETUP
 ###############################################################################
+IFS=',' read -r -a EXTRA_RO <<<"${BWRAP_EXTRA_RO:-}"
+IFS=',' read -r -a EXTRA_RW <<<"${BWRAP_EXTRA_RW:-}"
+
+# If BWRAP_EXTRA_RO or BWRAP_EXTRA_RW are set, mark them as read-only because cache is supposed to be read at least.
+declare -A PROTECTED_R
+for p in "${EXTRA_RO[@]}" "${EXTRA_RW[@]}"; do
+  a=$p
+  while [[ $a != "/" ]]; do
+    PROTECTED_R["$a"]=1
+    a=$(dirname "$a")
+  done
+done
+
+
 
 BWRAP_COMMAND_COUNT=0
 
@@ -109,6 +123,16 @@ BASE_OPTIONS=(
 # add read-only bind for every critical dir that exists
 for dir in "${CRITICAL_TOP[@]}" "${LARGE_VOLATILE[@]}"; do
     [[ -d $dir ]] && BASE_OPTIONS+=( --ro-bind "$dir" "$dir" )
+done
+
+
+# user supplied extra binds, e.g. for caching build frameworks across prune runs
+for p in "${EXTRA_RO[@]}"; do
+    [[ -e $p ]] || error "BWRAP_EXTRA_RO path does not exist: $p"
+done
+
+for p in "${EXTRA_RW[@]}"; do
+    [[ -e $p ]] || error "BWRAP_EXTRA_RW path does not exist: $p"
 done
 
 
@@ -186,6 +210,17 @@ build_bwrap_command() {
     esac
   done
 
+  # Add any extra read-write binds provided by the user (e.g. for caching)
+  for p in "${EXTRA_RO[@]}"; do
+      [[ -e $p ]] || error "BWRAP_EXTRA_RO path does not exist: $p"
+      BASE_OPTIONS+=( --ro-bind "$p" "$p" )
+  done
+
+  for p in "${EXTRA_RW[@]}"; do
+      [[ -e $p ]] || error "BWRAP_EXTRA_RW path does not exist: $p"
+      BASE_OPTIONS+=( --bind    "$p" "$p" )
+  done
+
   # Append tail options
   options+=("${TAIL_OPTIONS[@]}")
 
@@ -233,7 +268,6 @@ test_build_script() {
     exit_code=$?
     set -e
 
-    # default patterns: Gradle and Maven test-failure line
     # 1) If it failed but matches an IGNORABLE_FAILURE_PATTERNS, treat as success
     if (( exit_code != 0 )) \
        && [[ -n $IGNORABLE_FAILURE_PATTERNS ]] \
@@ -271,6 +305,9 @@ prune_tree() {
     [ -d "$child" ] || continue
     # skip system directories
     is_in_list "$child" "${PSEUDO_FS[@]}" && continue
+
+    # skip cached read directory
+    [[ -n "${PROTECTED_R[$child]:-}" ]] && continue
 
     log "Testing candidate: $child"
 
@@ -360,22 +397,6 @@ demote_writable_parents() {
 }
 
 
-###############################################################################
-# 8) CREATE A FINAL BWRAP SCRIPT
-###############################################################################
-create_final_script() {
-  local outfile="final_bwrap.sh"
-  echo "#!/bin/bash" > "$outfile"
-  echo "# Replays the final bwrap command with pruned settings." >> "$outfile"
-
-  # We can just store the one-liner. Or to be safe, we replicate build_bwrap_command
-  local final_cmd
-  final_cmd=$(build_bwrap_command)
-
-  echo "$final_cmd" >> "$outfile"
-  chmod +x "$outfile"
-  log "Final bwrap script saved to $outfile"
-}
 
 ###############################################################################
 # 9) MAIN EXECUTION
@@ -417,5 +438,6 @@ if [[ -n "$TEST_DIR" ]]; then
   CONFIG["$TEST_DIR"]=r
 fi
 
+for p in "${EXTRA_RO[@]}"; do CONFIG["$p"]="r"; done
+for p in "${EXTRA_RW[@]}"; do CONFIG["$p"]="w"; done
 save_configuration
-create_final_script

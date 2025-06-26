@@ -14,6 +14,7 @@ RUN mkdir -p /home/sandboxuser/.gradle/wrapper/dists \
             /home/sandboxuser/.m2/repository  \
  && chown -R sandboxuser:sandboxuser /home/sandboxuser
 
+
 USER sandboxuser
 
 # ---------- 4. default entrypoint = pruning script --------------------------

@@ -2,24 +2,29 @@ services:
   prune_python:
     build: ./python
     volumes:
+      - path_sets:/var/tmp/path_sets
+      - opt:/var/tmp/opt/core
       - ../../var/tmp:/var/tmp
-    command: ["python"]
+    command: ["--verbose", "--cache-dir", "/home/sandboxuser/.cache/pip", "python"]
 
   prune_java:
     build: ./java
     volumes:
+      - path_sets:/var/tmp/path_sets
       - ../../var/tmp:/var/tmp
-    command: ["java"]
+    command: ["--verbose", "--cache-dir", "/home/sandboxuser/.gradle", "java" ]
 
   prune_c:
     build: ./c
     volumes:
+      - path_sets:/var/tmp/path_sets
       - ../../var/tmp:/var/tmp
     command: ["c"]
 
   orchestrate:
     build: orchestrate
     volumes:
+      - path_sets:/var/tmp/path_sets
       - ../../var/tmp:/var/tmp
     depends_on:
       prune_python:
@@ -30,6 +35,11 @@ services:
         condition: service_completed_successfully
     command:
       [
-        "--langs", "java",
+        "--langs", "java, python",
         "--path-dir", "/var/tmp/path_sets", "--skip-prune"
       ]
+
+
+volumes:
+  path_sets: {}
+  opt: {}

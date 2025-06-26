@@ -100,6 +100,28 @@ def collect_language_data(langs: Iterable[str]) -> Dict[str, Dict[str, Set[str]]
         data[lang] = {'r': r_set, 'w': w_set}
     return data
 
+
+def preprocess_and_union() -> None:
+    """
+    1) run preprocess_bindings.py on every final_bindings_*.txt
+    2) call make_lang_sets.py once per language
+    """
+    import subprocess, glob
+
+    # 1) exercise-level .paths
+    for src in glob.glob(str(PATH_DIR / "final_bindings_*.txt")):
+        _, lang, rest = Path(src).stem.split('_', 2)   # crude but fine
+        ex   = rest.replace("final_bindings_", "")
+        cmd  = ["python3", "/app/preprocess_bindings.py", src, lang, ex, str(PATH_DIR)]
+        run(cmd, f"preproc:{lang}:{ex}")
+
+    # 2) per-language union / intersection
+    for lang in langs:
+        if not any(Path(PATH_DIR).glob(f"{lang}_*.paths")):
+            continue
+        cmd = ["python3", "/app/make_lang_sets.py", lang, str(PATH_DIR)]
+        run(cmd, f"langsets:{lang}")
+
 # ────────────────────────────────────────── writers
 
 def write_cfg(read_set: Set[str], write_set: Set[str], dest: Path) -> None:
@@ -123,7 +145,12 @@ with ThreadPoolExecutor(max_workers=args.jobs) as pool:
         except Exception as exc:
             print(f'\033[31m{lang} prune failed:\033[0m', exc)
 
+
+
+
+
 # 2) gather *.paths data
+preprocess_and_union()
 lang_data = collect_language_data(langs)
 if not lang_data:
     print('\033[31m[error]\033[0m no union.paths present – abort')

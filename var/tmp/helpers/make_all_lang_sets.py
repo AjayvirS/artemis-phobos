@@ -70,45 +70,46 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input-dir", required=True, type=pathlib.Path,
                     help="Directory with *_union.paths / *_intersection.paths")
-    ap.add_argument("--output-dir", required=True, type=pathlib.Path,
-                    help="Directory with *_union.paths / *_intersection.paths")
-    args = ap.parse_args()
-    base_dir: pathlib.Path = args.input_dir
-    core_dir: pathlib.Path = args.output_dir
+    ap.add_argument("--output-dir", default=pathlib.Path("/var/tmp/opt/core/local"),
+                    type=pathlib.Path,
+                    help="Destination directory for BasePhobos.cfg "
+                         "(defaults to /var/tmp/opt/core/local)")
+args = ap.parse_args()
+base_dir: pathlib.Path = args.input_dir
+core_dir: pathlib.Path = args.output_dir
 
-    union_files  = list(base_dir.glob("*_union.paths"))
-    inter_files  = list(base_dir.glob("*_intersection.paths"))
-    if not union_files:
-        raise SystemExit(f"No *_union.paths files in {base_dir}")
-    if not inter_files:
-        raise SystemExit(f"No *_intersection.paths files in {base_dir}")
+union_files = list(base_dir.glob("*_union.paths"))
+inter_files = list(base_dir.glob("*_intersection.paths"))
+if not union_files:
+    raise SystemExit(f"No *_union.paths files in {base_dir}")
+if not inter_files:
+    raise SystemExit(f"No *_intersection.paths files in {base_dir}")
 
-    union_map = strongest_modes(union_files)
-    write_paths_file(union_map, base_dir / "union_all.paths")
+union_map = strongest_modes(union_files)
+write_paths_file(union_map, base_dir / "union_all.paths")
 
-    inter_map = intersection_modes(inter_files)
-    write_paths_file(inter_map, base_dir / "intersection_all.paths")
+inter_map = intersection_modes(inter_files)
+write_paths_file(inter_map, base_dir / "intersection_all.paths")
 
-    readonly = [p for p, m in union_map.items() if m == "r"]
-    writable = [p for p, m in union_map.items() if m == "w"]
+readonly = [p for p, m in union_map.items() if m == "r"]
+writable = [p for p, m in union_map.items() if m == "w"]
 
-    cfg_path = core_dir / "BasePhobos.cfg"
-    with cfg_path.open("w") as cfg:
-        if readonly:
-            cfg.write("[readonly]\n")
-            cfg.write("\n".join(sorted(readonly)) + "\n\n")
-        if writable:
-            cfg.write("[write]\n")
-            cfg.write("\n".join(sorted(writable)) + "\n\n")
+cfg_path = core_dir / "BasePhobos.cfg"
+with cfg_path.open("w") as cfg:
+    if readonly:
+        cfg.write("[readonly]\n")
+        cfg.write("\n".join(sorted(readonly)) + "\n\n")
+    if writable:
+        cfg.write("[write]\n")
+        cfg.write("\n".join(sorted(writable)) + "\n\n")
 
-        # default-open network section
-        cfg.write("[network]\nallow *\n\n")
+    # default-open network section
+    cfg.write("[network]\nallow *\n\n")
 
-        # default limits
-        cfg.write("[limits]\ntimeout=0\n")
+    # default limits
+    cfg.write("[limits]\ntimeout=0\n")
 
-    print("Wrote", cfg_path)
-
+print("Wrote", cfg_path)
 
 if __name__ == "__main__":
     main()
