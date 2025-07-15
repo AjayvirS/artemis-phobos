@@ -27,8 +27,7 @@ RUN pip3 install --no-cache-dir \
 RUN useradd -m sandboxuser
 
 # host bind mounts will point at these; keep ownership consistent
-RUN mkdir -p /var/tmp/path_sets /var/tmp/opt/core/local && \
-    chown -R sandboxuser:sandboxuser /var/tmp
+RUN chown -R sandboxuser:sandboxuser /var/tmp
 
 # optional: a writable pip cache that callers can bind with BWRAP_EXTRA_RW
 RUN mkdir -p /home/sandboxuser/.cache/pip && \

@@ -7,8 +7,7 @@ RUN apt-get update && apt-get install -y \
 
 RUN useradd sandboxuser
 
-RUN mkdir -p /var/tmp/path_sets /var/tmp/opt/core/local \
- && chown -R sandboxuser:sandboxuser /var/tmp/path_sets /var/tmp/opt
+RUN chown -R sandboxuser:sandboxuser /var/tmp
 
 RUN mkdir -p /home/sandboxuser/.gradle/wrapper/dists \
             /home/sandboxuser/.m2/repository  \

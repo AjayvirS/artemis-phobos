@@ -35,6 +35,9 @@ ap.add_argument('--tests-dir',  default='/var/tmp/testing-dir',
                 help='Root that contains <lang>/ sub‑dirs with exercises')
 ap.add_argument('--path-dir',   default='/var/tmp/path_sets',
                 help='Where <lang>_*.paths files are read/written')
+
+ap.add_argument('--helpers-dir',   default='/var/tmp/helpers',
+                help='Where the processing scripts reside (e.g. preprocess_bindings.py)')
 ap.add_argument('--jobs',       type=int, default=os.cpu_count() or 4)
 ap.add_argument('--skip-prune', action='store_true')
 ap.add_argument('--verbose',    action='store_true')
@@ -43,7 +46,7 @@ args = ap.parse_args()
 langs: List[str] = [l.strip() for l in args.langs.split(',') if l.strip()]
 PATH_DIR = Path(args.path_dir);            PATH_DIR.mkdir(parents=True, exist_ok=True)
 CORE_DIR = Path('/var/tmp/opt/core/local'); CORE_DIR.mkdir(parents=True, exist_ok=True)
-
+HELPERS_DIR = Path(args.helpers_dir)
 PRUNE_SCRIPT = Path('/var/tmp/pruning/run_minimal_fs_all.sh')
 
 # ────────────────────────────────────────── helpers
@@ -112,14 +115,14 @@ def preprocess_and_union() -> None:
     for src in glob.glob(str(PATH_DIR / "final_bindings_*.txt")):
         _, lang, rest = Path(src).stem.split('_', 2)   # crude but fine
         ex   = rest.replace("final_bindings_", "")
-        cmd  = ["python3", "/workspace/preprocess_bindings.py", src, lang, ex, str(PATH_DIR)]
+        cmd  = ["python3", f"{HELPERS_DIR}/preprocess_bindings.py", src, lang, ex, str(PATH_DIR)]
         run(cmd, f"preproc:{lang}:{ex}")
 
     # 2) per-language union / intersection
     for lang in langs:
         if not any(Path(PATH_DIR).glob(f"{lang}_*.paths")):
             continue
-        cmd = ["python3", "/workspace/make_lang_sets.py", lang, str(PATH_DIR)]
+        cmd = ["python3", f"{HELPERS_DIR}/make_lang_sets.py", lang, str(PATH_DIR)]
         run(cmd, f"langsets:{lang}")
 
 # ────────────────────────────────────────── writers
