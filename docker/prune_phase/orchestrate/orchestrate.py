@@ -3,44 +3,50 @@
 orchestrate.py – prune, merge & build binding config files used by Bubblewrap
 sandboxes.
 
-Outputs (all in /var/tmp/opt/core/local)
------------------------------------------
+Refactored to consume *pre‑generated* per‑exercise artifacts (.paths/.json) and a
+cumulative `TailPhobos.cfg` emitted upstream by `run_minimal_fs_all.sh` +
+`emit_artifacts.py`.
+
+### Outputs (all in /var/tmp/opt/core/local)
 * **BasePhobos.cfg**            – **UNION** of bindings from *all* languages →
   used when the runtime cannot tell which language is running.
-* **BaseLanguage-<lang>.cfg**   – *full* binding set for that language
-  (duplicates with BasePhobos allowed).
+* **BaseLanguage-<lang>.cfg**   – full binding set for that language (duplicates ok).
 * **BasePhobosIntersect.cfg**   – **INTERSECTION** (common bindings across all
   languages).
-* **Base<lang>Intersect.cfg**   – intersection of *that* language with
-  BasePhobos (same as language’s full set but written separately for clarity).
-* **TailStatic.cfg**            – copied verbatim when present.
+* **Base<lang>Intersect.cfg**   – intersection of that language with BasePhobos
+  (redundant but useful for auditing).
+* **TailPhobos.cfg**            – merged tail flags suitable for *runtime* use.
+  (Any per‑exercise `--chdir` tokens found during pruning are stripped; a
+  runtime chdir is injected via `--runtime-chdir` CLI argument.)
 
-Overlaps are now fine; extra intersection files are just for auditing.
+Overlaps are fine; intersection files are for human inspection.
 """
 
 from __future__ import annotations
 import argparse, os, shlex, subprocess, sys, textwrap, time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, Iterable, List, Set, Tuple
+from typing import Dict, Iterable, List, Sequence, Set, Tuple
 
 # ────────────────────────────────────────── CLI
 ap = argparse.ArgumentParser(
     formatter_class=argparse.RawTextHelpFormatter,
     description=textwrap.dedent(__doc__))
 
-ap.add_argument('--langs',      required=True,
+ap.add_argument('--langs', required=True,
                 help='comma‑separated: java,python,c')
-ap.add_argument('--tests-dir',  default='/var/tmp/testing-dir',
-                help='Root that contains <lang>/ sub‑dirs with exercises')
-ap.add_argument('--path-dir',   default='/var/tmp/path_sets',
-                help='Where <lang>_*.paths files are read/written')
-
-ap.add_argument('--helpers-dir',   default='/var/tmp/helpers',
-                help='Where the processing scripts reside (e.g. preprocess_bindings.py)')
-ap.add_argument('--jobs',       type=int, default=os.cpu_count() or 4)
-ap.add_argument('--skip-prune', action='store_true')
-ap.add_argument('--verbose',    action='store_true')
+ap.add_argument('--tests-dir', default='/var/tmp/testing-dir',
+                help='Root that contains <lang>/ sub‑dirs with exercises (passed to prune script).')
+ap.add_argument('--path-dir', default='/var/tmp/path_sets',
+                help='Where <lang>_*.paths, *.json & TailPhobos.cfg live (input).')
+ap.add_argument('--helpers-dir', default='/var/tmp/helpers',
+                help='Where helper scripts (make_lang_sets.py) reside.')
+ap.add_argument('--jobs', type=int, default=os.cpu_count() or 4)
+ap.add_argument('--skip-prune', action='store_true',
+                help='Skip running prune scripts; use existing artifacts in --path-dir.')
+ap.add_argument('--verbose', action='store_true')
+ap.add_argument('--runtime-chdir', default='/var/tmp/testing-dir',
+                help='Directory the *runtime* sandbox should chdir into (overrides any per‑exercise chdir seen during pruning).')
 args = ap.parse_args()
 
 langs: List[str] = [l.strip() for l in args.langs.split(',') if l.strip()]
@@ -48,12 +54,13 @@ PATH_DIR = Path(args.path_dir);            PATH_DIR.mkdir(parents=True, exist_ok
 CORE_DIR = Path('/var/tmp/opt/core/local'); CORE_DIR.mkdir(parents=True, exist_ok=True)
 HELPERS_DIR = Path(args.helpers_dir)
 PRUNE_SCRIPT = Path('/var/tmp/pruning/run_minimal_fs_all.sh')
+MAKE_LANG_SETS = HELPERS_DIR / 'make_lang_sets.py'
 
 # ────────────────────────────────────────── helpers
 
-def run(cmd: str | List[str], tag: str = '') -> None:
+def run(cmd: Sequence[str] | str, tag: str = '') -> None:
     """Run *cmd* streaming output; raise if exit‑status != 0."""
-    pretty = cmd if isinstance(cmd, str) else ' '.join(shlex.quote(c) for c in cmd)
+    pretty = cmd if isinstance(cmd, str) else ' '.join(shlex.quote(str(c)) for c in cmd)
     print(f'\033[34m[{tag or "cmd"}]\033[0m', pretty)
     t0 = time.time()
     rc = subprocess.call(cmd, shell=isinstance(cmd, str))
@@ -61,6 +68,7 @@ def run(cmd: str | List[str], tag: str = '') -> None:
     if rc:
         raise RuntimeError(f'{tag} failed (rc={rc}, {dt:.1f}s)')
     print(f'\033[32m✓ {tag} ({dt:.1f}s)\033[0m')
+
 
 # ────────────────────────────────────────── step 1 – prune
 
@@ -73,24 +81,50 @@ def prune_language(lang: str) -> None:
     cmd: List[str] = [str(PRUNE_SCRIPT)]
     if args.verbose:
         cmd.append('--verbose')
+    # NOTE: PRUNE_SCRIPT infers EX_ROOT from /var/tmp/testing-dir/<lang>.  It
+    # writes per‑exercise artifacts into PATH_DIR via emit_artifacts.py.  See
+    # run_minimal_fs_all.sh.
     cmd.append(lang)
     run(cmd, f'prune:{lang}')
+
+
+# ────────────────────────────────────────── language union generation
+
+def gen_lang_sets(lang: str) -> None:
+    """Invoke make_lang_sets.py to produce <lang>_union.paths & _intersection.paths."""
+    if not MAKE_LANG_SETS.exists():
+        raise FileNotFoundError(f'make_lang_sets.py not found: {MAKE_LANG_SETS}')
+    # Skip languages that have no per‑exercise .paths (all exercises skipped).
+    if not any(PATH_DIR.glob(f"{lang}_*.paths")):
+        print(f'\033[33m[warn]\033[0m no {lang}_*.paths in {PATH_DIR}; skipping langsets.')
+        return
+    cmd = ['python3', str(MAKE_LANG_SETS), lang, str(PATH_DIR)]
+    run(cmd, f'langsets:{lang}')
+
 
 # ────────────────────────────────────────── utilities
 
 def _read_union(path: Path) -> Tuple[Set[str], Set[str]]:
-    """Return (readonly_set, write_set) from a *_union.paths file."""
+    """Return (readonly_set, write_set) from a *_union.paths file.
+
+    Lines are expected in the form `r /abs/path` or `w /abs/path` as written by
+    make_lang_sets.py.  Blank/comment lines are ignored.
+    """
     readonly, write = set(), set()
-    for line in path.read_text().splitlines():
-        mode, p = line.split(maxsplit=1)
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith('#'):
+            continue
+        try:
+            mode, p = line.split(maxsplit=1)
+        except ValueError:
+            continue
         if mode == 'w':
             write.add(p); readonly.discard(p)
-        else:
-            if p not in write:
-                readonly.add(p)
+        elif p not in write:
+            readonly.add(p)
     return readonly, write
 
-# ────────────────────────────────────────── step 2 – gather data
 
 def collect_language_data(langs: Iterable[str]) -> Dict[str, Dict[str, Set[str]]]:
     data: Dict[str, Dict[str, Set[str]]] = {}
@@ -104,41 +138,49 @@ def collect_language_data(langs: Iterable[str]) -> Dict[str, Dict[str, Set[str]]
     return data
 
 
-def preprocess_and_union() -> None:
-    """
-    1) run preprocess_bindings.py on every final_bindings_*.txt
-    2) call make_lang_sets.py once per language
-    """
-    import subprocess, glob
+# ────────────────────────────────────────── tail handling
 
-    # 1) exercise-level .paths
-    for src in glob.glob(str(PATH_DIR / "final_bindings_*.txt")):
-        _, lang, rest = Path(src).stem.split('_', 2)   # crude but fine
-        ex   = rest.replace("final_bindings_", "")
-        cmd  = ["python3", f"{HELPERS_DIR}/preprocess_bindings.py", src, lang, ex, str(PATH_DIR)]
-        run(cmd, f"preproc:{lang}:{ex}")
+def _sanitize_tail_tokens(tokens: List[str], runtime_chdir: str) -> List[str]:
+    """Drop any per‑exercise --chdir tokens and inject the runtime one.
 
-    # 2) per-language union / intersection
-    for lang in langs:
-        if not any(Path(PATH_DIR).glob(f"{lang}_*.paths")):
+    During pruning each exercise ran with `--chdir <exercise-workdir>` in the
+    TAIL_OPTIONS array in detect_minimal_fs.sh.  Those paths are ephemeral and
+    meaningless at runtime.  We therefore discard them and append a stable
+    `--chdir runtime_chdir` token.  We preserve other flags (e.g., --share-net).
+    fileciteturn7file9turn7file10
+    """
+    out: List[str] = []
+    it = iter(tokens)
+    for tok in it:
+        if tok == '--chdir':
+            # skip its operand
+            try: next(it)
+            except StopIteration: pass
             continue
-        cmd = ["python3", f"{HELPERS_DIR}/make_lang_sets.py", lang, str(PATH_DIR)]
-        run(cmd, f"langsets:{lang}")
+        out.append(tok)
+    # ensure our runtime chdir appears last
+    out += ['--chdir', runtime_chdir]
+    return out
 
-# ────────────────────────────────────────── writers
 
-def write_cfg(read_set: Set[str], write_set: Set[str], dest: Path) -> None:
-    lines: List[str] = []
-    if read_set:
-        lines += ['[readonly]', *sorted(read_set), '']
-    if write_set:
-        lines += ['[write]',    *sorted(write_set),    '']
-    dest.write_text('\n'.join(lines))
+def build_runtime_tail(runtime_chdir: str) -> None:
+    """Read PATH_DIR/TailPhobos.cfg, sanitize, write to CORE_DIR/TailPhobos.cfg."""
+    src_tail = PATH_DIR / 'TailPhobos.cfg'
+    dst_tail = CORE_DIR / 'TailPhobos.cfg'
+    if not src_tail.exists():
+        print('\033[33m[warn]\033[0m TailPhobos.cfg missing in', PATH_DIR)
+        return
+    raw = src_tail.read_text().strip()
+    tokens = shlex.split(raw)
+    tokens = _sanitize_tail_tokens(tokens, runtime_chdir)
+    dst_tail.write_text(' '.join(tokens) + '\n')
+    print('  • wrote TailPhobos.cfg (runtime chdir set to', runtime_chdir + ')')
+
 
 # ────────────────────────────────────────── main pipeline
 print('\n\033[1mOrchestrating for:\033[0m', ', '.join(langs), '\n')
 
-# 1) prune in parallel
+# 1) prune in parallel (creates per‑exercise artifacts in PATH_DIR)
 with ThreadPoolExecutor(max_workers=args.jobs) as pool:
     fut2lang = {pool.submit(prune_language, l): l for l in langs}
     for fut in as_completed(fut2lang):
@@ -148,26 +190,35 @@ with ThreadPoolExecutor(max_workers=args.jobs) as pool:
         except Exception as exc:
             print(f'\033[31m{lang} prune failed:\033[0m', exc)
 
+# 2) generate per‑language union/intersection files
+for L in langs:
+    gen_lang_sets(L)
 
-
-
-
-# 2) gather *.paths data
-preprocess_and_union()
+# 3) gather *_union.paths
 lang_data = collect_language_data(langs)
 if not lang_data:
     print('\033[31m[error]\033[0m no union.paths present – abort')
     sys.exit(1)
 
-# 3) BasePhobos (UNION)
+# 4) BasePhobos (UNION across langs)
 read_union, write_union = set(), set()
 for info in lang_data.values():
     write_union |= info['w']
 for info in lang_data.values():
     read_union |= (info['r'] - write_union)
-write_cfg(read_union, write_union, CORE_DIR / 'BasePhobos.cfg')
+write_cfg_path = CORE_DIR / 'BasePhobos.cfg'
 
-# 4) BasePhobosIntersect (intersection across languages)
+def _write_cfg(read_set: Set[str], write_set: Set[str], dest: Path) -> None:
+    lines: List[str] = []
+    if read_set:
+        lines += ['[readonly]', *sorted(read_set), '']
+    if write_set:
+        lines += ['[write]', *sorted(write_set), '']
+    dest.write_text('\n'.join(lines))
+
+_write_cfg(read_union, write_union, write_cfg_path)
+
+# 5) BasePhobosIntersect (intersection across languages)
 all_sets = [(info['r'] | info['w']) for info in lang_data.values()]
 inter_all = set.intersection(*all_sets)
 read_inter_all, write_inter_all = set(), set()
@@ -176,27 +227,17 @@ for p in inter_all:
         write_inter_all.add(p)
     else:
         read_inter_all.add(p)
-write_cfg(read_inter_all, write_inter_all, CORE_DIR / 'BasePhobosIntersect.cfg')
+_write_cfg(read_inter_all, write_inter_all, CORE_DIR / 'BasePhobosIntersect.cfg')
 
-# 5) per‑language files (full & intersection)
-for lang, info in lang_data.items():
-    # full union for that language
-    write_cfg(info['r'], info['w'], CORE_DIR / f'BaseLanguage-{lang}.cfg')
+# 6) per‑language files (full & intersection)
+for L, info in lang_data.items():
+    _write_cfg(info['r'], info['w'], CORE_DIR / f'BaseLanguage-{L}.cfg')
+    Lcap = L.capitalize()
+    lang_inter_read  = info['r'] & (read_union | write_union)
+    lang_inter_write = info['w'] & (read_union | write_union)
+    _write_cfg(lang_inter_read, lang_inter_write, CORE_DIR / f'Base{Lcap}Intersect.cfg')
 
-    # intersection with BasePhobos (redundant but requested)
-    # here, it is simply the same as language’s own set, but kept for auditing
-    lang_inter_read  = info['r'] & (read_union | write_union)  # == info['r']
-    lang_inter_write = info['w'] & (read_union | write_union)  # == info['w']
-    write_cfg(lang_inter_read, lang_inter_write,
-              CORE_DIR / f'Base{lang.capitalize()}Intersect.cfg')
-
-# 6) TailStatic passthrough
-src_tail = PATH_DIR / 'TailStatic.cfg'
-dst_tail = CORE_DIR / 'TailStatic.cfg'
-if src_tail.exists():
-    dst_tail.write_text(src_tail.read_text())
-    print('  • copied TailStatic.cfg')
-else:
-    print('\033[33m[warn]\033[0m TailStatic.cfg missing in', PATH_DIR)
+# 7) TailPhobos (sanitize & inject runtime chdir)
+build_runtime_tail(args.runtime_chdir)
 
 print('\n\033[1mDone.\033[0m')
