@@ -8,6 +8,7 @@
 #       └─ assignment/        (student code; tests embedded or discovered)
 #
 # Each exercise is copied to /tmp, pruned, and the temporary folder is removed.
+# Post-process each prune result into machine-readable artifacts (.paths/.json).
 #
 #   --cache-dir <path>   Bind <path> read‑write inside Bubblewrap so *any* build
 #                        system can reuse download caches across pruning runs.
@@ -18,6 +19,19 @@
 # -----------------------------------------------------------------------------
 set -euo pipefail
 trap 'echo "[ERR ] aborted at line $LINENO – see message above" >&2' ERR
+
+
+
+###############################################################################
+# 0) CONFIGURABLE PATHS
+###############################################################################
+# Location of helper that converts detect_minimal_fs.sh log -> .paths/.json/TailPhobos.
+# Override with env HELPER_DIR=/custom/path (helper filename fixed below).
+HELPER_DIR="${HELPER_DIR:-/var/tmp/helpers}"
+EMIT_HELPER="$HELPER_DIR/emit_artifacts.py"
+# Delete raw final_bindings logs after successful parse? 1=keep, 0=delete (default).
+PHOBOS_KEEP_LOG="${PHOBOS_KEEP_LOG:-0}"
+
 
 ###############################################################################
 # 1) CLI & LOGGING
@@ -83,6 +97,7 @@ OUTPUT_DIR="/var/tmp/path_sets"
 [[ -d "$EX_ROOT"      ]] || error "Language folder not found: $EX_ROOT"
 [[ -x "$PRUNE_SCRIPT" ]] || error "Prune script not exec: $PRUNE_SCRIPT"
 mkdir -p "$OUTPUT_DIR"
+mkdir -p "$HELPER_DIR" 2>/dev/null || true
 
 ###############################################################################
 # 3) OPTIONAL CACHE BIND
@@ -139,10 +154,31 @@ for ex_dir in "${exercises[@]}"; do
   bindings_src="$workdir/final_bindings.txt"
   [[ -f "$bindings_src" ]] || error "final_bindings.txt missing for $ex_name"
 
-  mv "$bindings_src" "$OUTPUT_DIR/final_bindings_${lang}_${ex_name}.txt"
-
-
+  # Emit structured artifacts (.paths, .json, TailPhobos.cfg) from the detect log.
+  # We reuse the parsing logic formerly in preprocess_bindings.py. :contentReference[oaicite:16]{index=16}
+  if [[ -x "$EMIT_HELPER" ]]; then
+    log "Emitting artifacts for $ex_name -> $OUTPUT_DIR"
+    if python3 "$EMIT_HELPER" \
+         --lang "$lang" \
+         --exercise "$ex_name" \
+         --config-file "$bindings_src" \
+         --out-dir "$OUTPUT_DIR"; then
+      # Optionally archive or delete raw log to avoid bloat.
+      if (( PHOBOS_KEEP_LOG )); then
+        mv "$bindings_src" "$OUTPUT_DIR/final_bindings_${lang}_${ex_name}.txt"
+      else
+        rm -f "$bindings_src"
+      fi
+    else
+      echo "[WARN] emit_artifacts.py failed; copying raw log untouched." >&2
+      mv "$bindings_src" "$OUTPUT_DIR/final_bindings_${lang}_${ex_name}.txt"
+    fi
+  else
+    # Helper missing; fall back to old behaviour (copy raw log).
+    log "emit_artifacts helper not found ($EMIT_HELPER); copying raw log."
+    mv "$bindings_src" "$OUTPUT_DIR/final_bindings_${lang}_${ex_name}.txt"
+  fi
   rm -rf "$workdir"
 done
 
-info "All $lang exercises pruned – union.paths live in $OUTPUT_DIR"
+info "All $lang exercises pruned – artifacts in $OUTPUT_DIR"
