@@ -7,6 +7,18 @@
 # the order hide (n) → read-only (r) → writable (w). Any environment variables
 # for the build tool can be passed in as arguments or set externally.
 
+# **Stable output contract:** On success (or best-effort completion), this
+# script writes a *human-readable audit log* named `final_bindings.txt` in the
+# current working directory. Each line has the form:
+#     /abs/path -> n|r|w
+# followed by summary lines:
+#     Total Command Attempts: N
+#     Base options: <bubblewrap flags...>
+#     Tail options: <bubblewrap flags...>
+# Downstream tooling (run_minimal_fs_all.sh) consumes this log to produce
+# machine-readable artifacts (.paths, JSON, TailPhobos.cfg). Do not change the
+# log format without updating those tools.
+
 ###############################################################################
 # 1) ARGUMENT AND ENV VAR HANDLING
 ###############################################################################
