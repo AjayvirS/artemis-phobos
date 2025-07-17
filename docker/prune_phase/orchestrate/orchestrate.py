@@ -7,7 +7,7 @@ Refactored to consume *pre‑generated* per‑exercise artifacts (.paths/.json) 
 cumulative `TailPhobos.cfg` emitted upstream by `run_minimal_fs_all.sh` +
 `emit_artifacts.py`.
 
-### Outputs (all in /var/tmp/opt/core/local)
+### Outputs (all in /var/tmp/opt/core/config)
 * **BasePhobos.cfg**            – **UNION** of bindings from *all* languages →
   used when the runtime cannot tell which language is running.
 * **BaseLanguage-<lang>.cfg**   – full binding set for that language (duplicates ok).
@@ -51,7 +51,7 @@ args = ap.parse_args()
 
 langs: List[str] = [l.strip() for l in args.langs.split(',') if l.strip()]
 PATH_DIR = Path(args.path_dir);            PATH_DIR.mkdir(parents=True, exist_ok=True)
-CORE_DIR = Path('/var/tmp/opt/core/local'); CORE_DIR.mkdir(parents=True, exist_ok=True)
+CORE_DIR = Path('/var/tmp/opt/core/config'); CORE_DIR.mkdir(parents=True, exist_ok=True)
 HELPERS_DIR = Path(args.helpers_dir)
 PRUNE_SCRIPT = Path('/var/tmp/pruning/run_minimal_fs_all.sh')
 MAKE_LANG_SETS = HELPERS_DIR / 'make_lang_sets.py'
