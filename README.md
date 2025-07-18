@@ -6,7 +6,7 @@ environment access needed to build and test student programming exercises and th
 
 The goal: run untrusted student code with only the paths, network access, and resources
 it truly needs, improving reproducibility and safety in automated assessment systems
-such as Artemis.
+such as [Artemis](https://github.com/ls1intum/Artemis).
 
 ## What Problem Does Phobos Solve?
 
@@ -54,8 +54,7 @@ Each bullet shows filename pattern and what it contains.
 - `<lang>_<exercise>.paths` – lines of the form `r /abs/path` or `w /abs/path` that an
   exercise needs. Temp workdir prefixes (created during pruning under `/tmp/...`) are
   rewritten to the stable runtime root `/var/tmp/testing-dir` so configs are reusable.
-- `<lang>_<exercise>.json` – structured data for research/audit (dynamic vs. static paths,
-  provenance hash, etc.).
+- `<lang>_<exercise>.json` – structured data for research/audit (dynamic vs. static paths, etc.).
 - `TailPhobos.cfg` – global Bubblewrap tail flags. Exercise-specific `--chdir` values are
   removed; orchestrate later appends a single runtime `--chdir /var/tmp/testing-dir`.
 - `<lang>_union.paths` – union of all exercises for a language (produced by `make_lang_sets.py`).
@@ -70,13 +69,16 @@ Each bullet shows filename pattern and what it contains.
 Inside a prune container, exercises are mounted beneath `/var/tmp/testing-dir` like this:
 
 /var/tmp/testing-dir/
-python/
-ExerciseA/
-build_script # or build_script.sh (must be executable)
-assignment/ # student code + tests
-ExerciseB/...
-java/
-Exercise1/...
+>  python/
+>>    ExerciseA/
+>>>      build_script # or build_script.sh (must be executable)
+>>>      assignment/ # student code
+>>>      test/ #tests
+>>    ExerciseB/...
+
+>  java/
+>>    Exercise1/...
+
 
 
 ## Pruning Workflow (one language)
@@ -118,7 +120,7 @@ Selection logic:
 ### Configuration Sections
 
 Each cfg file is an INI-like text file. Example:
-
+```bash
 [readonly]
 /bin
 /usr
@@ -142,6 +144,7 @@ mem_mb=2048
 [restricted-commands]
 ls
 curl
+```
 
 
 Section meanings:
@@ -170,8 +173,10 @@ docker compose -f docker/prune_phase/docker-compose.yml up --build
 
 ### Run a sandboxed build (example: Java run-phase compose):
 
+```bash
 docker compose -f docker/run_phase/java/docker-compose.yml run --rm phobos-runner \
   ./wrapper/phobos_wrapper.sh --lang java -- ./build_script.sh
+```
 
 If you see an error about a missing seccomp profile, adjust the path in the compose file.
 Paths are resolved relative to that compose file; on Windows you may prefer
