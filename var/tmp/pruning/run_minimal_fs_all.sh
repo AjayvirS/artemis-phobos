@@ -155,13 +155,14 @@ for ex_dir in "${exercises[@]}"; do
   [[ -f "$bindings_src" ]] || error "final_bindings.txt missing for $ex_name"
 
   # Emit structured artifacts (.paths, .json, TailPhobos.cfg) from the detect log.
-  # We reuse the parsing logic formerly in preprocess_bindings.py. :contentReference[oaicite:16]{index=16}
   if [[ -x "$EMIT_HELPER" ]]; then
     log "Emitting artifacts for $ex_name -> $OUTPUT_DIR"
     if python3 "$EMIT_HELPER" \
          --lang "$lang" \
          --exercise "$ex_name" \
          --config-file "$bindings_src" \
+         --workdir "$workdir" \
+         --runtime-root "/var/tmp/testing-dir" \
          --out-dir "$OUTPUT_DIR"; then
       # Optionally archive or delete raw log to avoid bloat.
       if (( PHOBOS_KEEP_LOG )); then

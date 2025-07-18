@@ -46,7 +46,7 @@ def canon(p: str) -> str:
 # -----------------------------------------------------------------------------
 # Parse detect_minimal_fs log
 # -----------------------------------------------------------------------------
-def parse_log(path: pathlib.Path) -> Tuple[List[Tuple[str, str]],
+def parse_log(path: pathlib.Path, workdir, runtime_root) -> Tuple[List[Tuple[str, str]],
 Dict[str, str],
 List[str]]:
     """
@@ -71,7 +71,10 @@ List[str]]:
             m = RX_DETAIL.match(line)
             if m:
                 p, mode = m.groups()
-                dyn_pairs.append((mode, canon(p)))
+                cp = canon(p)
+                if cp.startswith(workdir):
+                        cp = cp.replace(workdir, runtime_root, 1)
+                dyn_pairs.append((mode, cp))
                 continue
 
             # Base static binds
@@ -204,6 +207,9 @@ def main() -> int:
     ap.add_argument("--config-file", required=True,
                     help="final_bindings.txt from detect_minimal_fs.sh")
     ap.add_argument("--out-dir", required=True)
+    ap.add_argument("--workdir", required=True,
+                    help="Temp workdir used during pruning; will be replaced.")
+    ap.add_argument("--runtime-root", default="/var/tmp/testing-dir")
     args = ap.parse_args()
 
     log_path = pathlib.Path(args.config_file)
@@ -213,7 +219,7 @@ def main() -> int:
         print(f"emit_artifacts: no log file {log_path}", file=sys.stderr)
         return 2
 
-    dyn_pairs, base_modes, tail_flags = parse_log(log_path)
+    dyn_pairs, base_modes, tail_flags = parse_log(log_path, args.workdir, args.runtime_root)
     merged_pairs = merge_pairs(dyn_pairs, base_modes)
 
     p_file = write_paths(args.lang, args.exercise, merged_pairs, out_dir)

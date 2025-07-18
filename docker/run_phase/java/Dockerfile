@@ -16,7 +16,7 @@ RUN useradd -m sandboxuser
 RUN mkdir -p /var/tmp/opt/core
 COPY ../../../core/phobos_wrapper.sh                 /var/tmp/opt/core/
 COPY ../../../core/libnetblocker.so                  /var/tmp/opt/core/
-COPY core/remote/*.cfg                      /var/tmp/opt/core/
+COPY core/config/*.cfg                      /var/tmp/opt/core/
 COPY ../../../core/allowedList.cfg                   /var/tmp/opt/core/
 
 
