@@ -35,10 +35,17 @@ such as Artemis.
   - `prune_phase/` – language-specific prune images and `run_minimal_fs_all.sh` driver.
   - `orchestrate/` – image containing `orchestrate.py` (merges artifacts).
   - `run_phase/` – images used at grading time (phobos-runner).
-- `pruning/` – `detect_minimal_fs.sh`, the pruning algorithm (hide→ro→rw).
-- `helpers/` – utilities; `emit_artifacts.py` parses prune logs into structured outputs.
-- `wrapper/` – `phobos_wrapper.sh`, the runtime Bubblewrap launcher used when grading.
-- `security_config/` – seccomp and AppArmor profiles used by run-phase containers.
+- `pruning/`
+  - `detect_minimal_fs.sh`
+  - `run_minimal_fs_all.sh`, the pruning algorithm and batch running it on different exercises/languages (hide→ro→rw).
+- `helpers/` – utilities
+  - `emit_artifacts.py` - parses prune logs into structured outputs.
+  - `orchestrate.py` - orchestrates the pruning and processing of the resulting .path files into .cfg files, which can then be consumed by the `phobos_wrapper.sh`
+- `opt/core`
+  - `phobos_wrapper.sh` - the runtime Bubblewrap launcher used when grading.
+  - `libnetblocker.so` - shared object library to override socket calls for network filtering
+  - `allowedList.cfg` - list of allowed hosts and ports, initially empty and filled by given configuration
+- `security_config/` – seccomp and AppArmor profiles used by run-phase containers (necessary to enable bwrap in certain unix distributions).
 
 ## Key Generated Artifacts
 
