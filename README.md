@@ -1,9 +1,4 @@
-# Write a simplified, table-free, horizontal-rule-free README that should render cleanly
-# in most Markdown editors (including some that mis-handle tables or '---' sequences).
-#
-# We'll save to /mnt/data/README_simple_phobos.md
-
-readme_text = """# Artemis Phobos
+# Artemis Phobos
 
 Phobos is a containerized toolchain that **discovers** the minimum filesystem and
 environment access needed to build and test student programming exercises and then
