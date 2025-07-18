@@ -7,11 +7,13 @@ services:
         target: /var/tmp
     command: ["--verbose", "--cache-dir", "/home/sandboxuser/.cache/pip", "python"]
 
-  #prune_java:
-    #build: ./java
-    #volumes:
-      #- ./var/tmp:/var/tmp
-    #command: ["--verbose", "--cache-dir", "/home/sandboxuser/.gradle", "java" ]
+  prune_java:
+    build: docker/prune_phase/java
+    volumes:
+      - type: bind
+        source: ./var/tmp
+        target: /var/tmp
+    command: ["--verbose", "--cache-dir", "/home/sandboxuser/.gradle", "java" ]
 
   prune_c:
     build: docker/prune_phase/c
@@ -30,12 +32,12 @@ services:
     depends_on:
       prune_python:
         condition: service_completed_successfully
-      #prune_java:
-        #condition: service_completed_successfully
+      prune_java:
+        condition: service_completed_successfully
       prune_c:
         condition: service_completed_successfully
     command:
       [
-        "--langs", "python",
+        "--langs", "python,java",
         "--path-dir", "/var/tmp/path_sets", "--skip-prune"
       ]

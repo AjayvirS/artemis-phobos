@@ -52,6 +52,9 @@ args = ap.parse_args()
 langs: List[str] = [l.strip() for l in args.langs.split(',') if l.strip()]
 PATH_DIR = Path(args.path_dir);            PATH_DIR.mkdir(parents=True, exist_ok=True)
 CORE_DIR = Path('/var/tmp/opt/core/config'); CORE_DIR.mkdir(parents=True, exist_ok=True)
+INTERSECT_DIR = CORE_DIR / 'debug'
+INTERSECT_DIR.mkdir(parents=True, exist_ok=True)
+
 HELPERS_DIR = Path(args.helpers_dir)
 PRUNE_SCRIPT = Path('/var/tmp/pruning/run_minimal_fs_all.sh')
 MAKE_LANG_SETS = HELPERS_DIR / 'make_lang_sets.py'
@@ -147,13 +150,11 @@ def _sanitize_tail_tokens(tokens: List[str], runtime_chdir: str) -> List[str]:
     TAIL_OPTIONS array in detect_minimal_fs.sh.  Those paths are ephemeral and
     meaningless at runtime.  We therefore discard them and append a stable
     `--chdir runtime_chdir` token.  We preserve other flags (e.g., --share-net).
-    fileciteturn7file9turn7file10
     """
     out: List[str] = []
     it = iter(tokens)
     for tok in it:
         if tok == '--chdir':
-            # skip its operand
             try: next(it)
             except StopIteration: pass
             continue
@@ -162,19 +163,54 @@ def _sanitize_tail_tokens(tokens: List[str], runtime_chdir: str) -> List[str]:
     out += ['--chdir', runtime_chdir]
     return out
 
+_ALLOWED_TAIL_FLAGS = {"--share-net"}
+
+# ────────────────────────────────────────── tail handling
+
 
 def build_runtime_tail(runtime_chdir: str) -> None:
-    """Read PATH_DIR/TailPhobos.cfg, sanitize, write to CORE_DIR/TailPhobos.cfg."""
+    """
+    Sanitise PATH_DIR/TailPhobos.cfg into CORE_DIR/TailPhobos.cfg.
+
+    1. Tokenise with shlex.split().
+    2. Drop every (--chdir <...>) pair.
+    3. Drop any orphan absolute‑path tokens (left‑over temp dirs).
+    4. Keep only flags in _ALLOWED_TAIL_FLAGS.
+    5. Deduplicate flags, preserve first occurrence.
+    6. Append '--chdir', runtime_chdir.
+    """
     src_tail = PATH_DIR / 'TailPhobos.cfg'
     dst_tail = CORE_DIR / 'TailPhobos.cfg'
+
     if not src_tail.exists():
         print('\033[33m[warn]\033[0m TailPhobos.cfg missing in', PATH_DIR)
         return
-    raw = src_tail.read_text().strip()
-    tokens = shlex.split(raw)
-    tokens = _sanitize_tail_tokens(tokens, runtime_chdir)
-    dst_tail.write_text(' '.join(tokens) + '\n')
+
+    tokens: list[str] = shlex.split(src_tail.read_text())
+
+    cleaned: list[str] = []
+    it = iter(tokens)
+    for tok in it:
+        if tok == '--chdir':
+            next(it, None)
+            continue
+        if tok.startswith('/'):        # orphan absolute path -> junk, drop
+            continue
+        if tok in _ALLOWED_TAIL_FLAGS:
+            cleaned.append(tok)
+
+    deduped: list[str] = []
+    seen = set()
+    for t in cleaned:
+        if t not in seen:
+            seen.add(t)
+            deduped.append(t)
+
+    deduped += ['--chdir', runtime_chdir]
+
+    dst_tail.write_text(' '.join(deduped) + '\n')
     print('  • wrote TailPhobos.cfg (runtime chdir set to', runtime_chdir + ')')
+
 
 
 # ────────────────────────────────────────── main pipeline
@@ -227,7 +263,7 @@ for p in inter_all:
         write_inter_all.add(p)
     else:
         read_inter_all.add(p)
-_write_cfg(read_inter_all, write_inter_all, CORE_DIR / 'BasePhobosIntersect.cfg')
+_write_cfg(read_inter_all, write_inter_all, INTERSECT_DIR / 'BasePhobosIntersect.cfg')
 
 # 6) per‑language files (full & intersection)
 for L, info in lang_data.items():
@@ -235,8 +271,7 @@ for L, info in lang_data.items():
     Lcap = L.capitalize()
     lang_inter_read  = info['r'] & (read_union | write_union)
     lang_inter_write = info['w'] & (read_union | write_union)
-    _write_cfg(lang_inter_read, lang_inter_write, CORE_DIR / f'Base{Lcap}Intersect.cfg')
-
+    _write_cfg(lang_inter_read, lang_inter_write, INTERSECT_DIR / f'Base{Lcap}Intersect.cfg')
 # 7) TailPhobos (sanitize & inject runtime chdir)
 build_runtime_tail(args.runtime_chdir)
 

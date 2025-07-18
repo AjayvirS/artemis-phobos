@@ -19,9 +19,6 @@ Parse a `final_bindings.txt` log produced by `detect_minimal_fs.sh` and emit:
 
   • <out_dir>/TailPhobos.cfg
       Merges/uniquifies all tail flags across every exercise processed.
-
-This helper replaces the old preprocess_bindings.py stage, eliminating the need
-to scrape logs later in the pipeline.
 """
 
 from __future__ import annotations
@@ -67,7 +64,7 @@ List[str]]:
             line = raw.strip()
             if not line:
                 continue
-            if line.startswith("[LOG] "):          # strip detect’s log prefix
+            if line.startswith("[LOG] "):  # strip detect’s log prefix
                 line = line[6:]
 
             # per-path detail block
@@ -84,10 +81,12 @@ List[str]]:
                 for flag in it:
                     try:
                         if flag == "--ro-bind":
-                            p = canon(next(it)); next(it)
+                            p = canon(next(it))
+                            next(it)
                             base_modes[p] = "r"
                         elif flag == "--bind":
-                            p = canon(next(it)); next(it)
+                            p = canon(next(it))
+                            next(it)
                             base_modes[p] = "w"
                         elif flag in ("--proc", "--dev", "--tmpfs"):
                             _ = next(it)
@@ -108,7 +107,7 @@ List[str]]:
 # -----------------------------------------------------------------------------
 def merge_pairs(dyn: List[Tuple[str, str]],
                 base: Dict[str, str]) -> List[Tuple[str, str]]:
-    merged: Dict[str, str] = dict(base)          # start with static
+    merged: Dict[str, str] = dict(base)  # start with static
     for mode, path in dyn:
         if mode == "n":
             continue
@@ -156,16 +155,41 @@ def write_json(lang: str, ex: str,
     return dest
 
 
+_TAIL_ALLOW = {"--share-net"}
+
+
+def _filter_tail(tokens: List[str]) -> List[str]:
+    """
+Drop any (--chdir <path>) pairs and keep only allow‑listed tail flags.
+We do this so ephemeral per‑exercise workdirs never end up in TailPhobos.cfg.
+"""
+    out: List[str] = []
+    it = iter(tokens)
+    for t in it:
+        if t == "--chdir":
+            next(it, None)  # discard operand and add correct runtime chdir later (path to test repository)
+            continue
+        if t in _TAIL_ALLOW:
+            out.append(t)
+    return out
+
+
 def merge_tail(flags: List[str], out_dir: pathlib.Path) -> pathlib.Path | None:
-    if not flags:
+    if not flags and not (out_dir / "TailPhobos.cfg").exists():
         return None
     dest = out_dir / "TailPhobos.cfg"
-    existing = dest.read_text().split() if dest.exists() else []
+    existing_tokens: List[str] = []
+    if dest.exists():
+        existing_tokens = dest.read_text().split()
+    new_tokens = _filter_tail(flags)
+    old_tokens = _filter_tail(existing_tokens)
+    # merge & distinct, preserve order (old first)
     merged = []
     seen = set()
-    for tok in existing + flags:
-        if tok not in seen:
-            seen.add(tok); merged.append(tok)
+    for t in old_tokens + new_tokens:
+        if t not in seen:
+            seen.add(t)
+        merged.append(t)
     dest.write_text(" ".join(merged) + "\n")
     return dest
 
@@ -183,7 +207,7 @@ def main() -> int:
     args = ap.parse_args()
 
     log_path = pathlib.Path(args.config_file)
-    out_dir  = pathlib.Path(args.out_dir)
+    out_dir = pathlib.Path(args.out_dir)
 
     if not log_path.is_file():
         print(f"emit_artifacts: no log file {log_path}", file=sys.stderr)
