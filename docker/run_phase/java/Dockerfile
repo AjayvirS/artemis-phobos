@@ -10,7 +10,8 @@ ENV PHOBOS_HOME=/var/tmp/opt/core
 RUN mkdir -p "${PHOBOS_HOME}"
 COPY *.sh                ${PHOBOS_HOME}/
 COPY libnetblocker.so                 ${PHOBOS_HOME}/
-COPY config/*.cfg                     ${PHOBOS_HOME}/
+COPY config/BaseLanguage-java.cfg                     ${PHOBOS_HOME}/
+COPY config/TailPhobos.cfg                     ${PHOBOS_HOME}/
 COPY allowedList.cfg                  ${PHOBOS_HOME}/
 RUN chmod +x ${PHOBOS_HOME}/phobos_wrapper.sh ${PHOBOS_HOME}/*.cfg \
  && chmod +w ${PHOBOS_HOME}/allowedList.cfg
