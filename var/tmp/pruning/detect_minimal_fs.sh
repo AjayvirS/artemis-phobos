@@ -151,6 +151,9 @@ done
 work_dir=$(dirname "$BUILD_SCRIPT")
 TAIL_OPTIONS=(
     --share-net
+    --unshare-user
+    --unshare-pid
+    --unshare-ipc
     --chdir "$work_dir"
 )
 

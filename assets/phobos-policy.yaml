@@ -11,65 +11,21 @@ regardingTheSupervisedCode:
   theFollowingClassesAreTestClasses: [ ]
   theFollowingResourceAccessesArePermitted:
     regardingFileSystemInteractions:
-      - onThisPathAndAllPathsBelow: "/opt/project/build"
-        readAllFiles: true
-        overwriteAllFiles: true
-        executeAllFiles: false
-        deleteAllFiles: true
-
-      - onThisPathAndAllPathsBelow: "/tmp"
-        readAllFiles: true
-        overwriteAllFiles: true
-        executeAllFiles: false
-        deleteAllFiles: true
-
       - onThisPathAndAllPathsBelow: "/opt/cache/gradle_home"
         readAllFiles: true
-        overwriteAllFiles: true
-        executeAllFiles: false
-        deleteAllFiles: true
-
-      - onThisPathAndAllPathsBelow: "/opt/cache/m2_repo"
+        writeAllFiles: true
+      - onThisPathAndAllPathsBelow: "/opt/testing-dir"
         readAllFiles: true
-        overwriteAllFiles: true
-        executeAllFiles: false
-        deleteAllFiles: true
-
-      - onThisPathAndAllPathsBelow: "/opt/test-repository"
-        readAllFiles: true
-        overwriteAllFiles: false
-        executeAllFiles: false
-        deleteAllFiles: false
-
-      - onThisPathAndAllPathsBelow: "/usr"
-        readAllFiles: true
-        overwriteAllFiles: false
-        executeAllFiles: false
-        deleteAllFiles: false
-
-      - onThisPathAndAllPathsBelow: "/bin"
-        readAllFiles: true
-        overwriteAllFiles: false
-        executeAllFiles: true
-        deleteAllFiles: false
-
-      - onThisPathAndAllPathsBelow: "/lib"
-        readAllFiles: true
-        overwriteAllFiles: false
-        executeAllFiles: true
-        deleteAllFiles: false
-
-      - onThisPathAndAllPathsBelow: "/lib64"
-        readAllFiles: true
-        overwriteAllFiles: false
-        executeAllFiles: true
-        deleteAllFiles: false
+        writeAllFiles: false
+    regardingTimeoutLimits:
+      timeoutAfterSeconds: 120
     regardingNetworkConnections:
-      - onTheHost: "*"
-        onThePort: 443
+      - onTheHost: "www.example.com"
+        onThePort: 80
         openConnections: true
         sendData: true
         receiveData: true
+
 
     regardingCommandExecutions: [ ]
 

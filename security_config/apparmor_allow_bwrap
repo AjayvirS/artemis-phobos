@@ -2,9 +2,7 @@
 
 profile docker-bwrap flags=(attach_disconnected,mediate_deleted) {
 
-  #########################################
-  #  capabilities identical to docker-default
-  #########################################
+  # Capabilities (docker-default + sys_admin for mount mediation)
   capability chown,
   capability dac_override,
   capability fowner,
@@ -20,32 +18,54 @@ profile docker-bwrap flags=(attach_disconnected,mediate_deleted) {
   capability audit_write,
   capability sys_admin,
 
-  #########################################
-  #  network, signal, ptrace  (docker-default)
-  #########################################
+  # Networking / signals / ptrace
   network inet,
   network inet6,
   network unix,
   signal (send,receive) set=(hup int term),
   ptrace (trace,read) peer=@{profile_name},
 
-  #########################################
-  #  file-system rules (docker-default)  —
-  #  we add three lines for Bubblewrap
-  #########################################
   file,
 
-  # ----- EXTRA for Bubblewrap ----------
-  mount,              # allow all mount() variants (covers MS_SLAVE)
-  pivot_root,         # allow pivot_root() if used
-  mount fstype=tmpfs, # tmpfs for --tmpfs paths
-  # -------------------------------------
-
+  # Namespaces & mount mediation
+  userns,
+  mount,
   umount,
+  pivot_root,
 
-  #########################################
-  #  keep docker-default’s deny list
-  #########################################
+  # Filesystems/targets used during bwrap setup (staging + final)
+  # bwrap mounts proc under /newroot first, then moves it to /proc
+  mount fstype=proc      -> /newroot/**,
+  mount fstype=proc      -> /proc,
+
+  # /dev is a tmpfs in the new mount ns; devpts for PTYs
+  mount fstype=tmpfs     -> /dev,
+  mount fstype=devpts    -> /dev/pts,
+
+  # tmpfs for scratch
+  mount fstype=tmpfs     -> /tmp/**,
+
+  # IPC ns mounts mqueue here
+  mount fstype=mqueue    -> /dev/mqueue,
+
+  # if sys needs to be potentially exposed
+  mount fstype=sysfs     -> /sys,
+
+  # Bind/rbind only where you actually bind
+  mount options=(bind)   -> /,
+  mount options=(bind)   -> /home,
+  mount options=(rbind)  -> /,
+  mount options=(rbind)  -> /home,
+
+  # Propagation/adjustments bwrap performs
+  mount options=(rprivate),
+  mount options=(rslave),
+
+  # Allow bwrap to move/remount mounts during finalization
+  mount options=(move)     -> /**,
+  mount options=(remount)  -> /**,
+
+  # Docker-default denies
   deny /sys/[^f]*/** wklx,
   deny /sys/f[^s]*/** wklx,
   deny /sys/fs/** wklx,

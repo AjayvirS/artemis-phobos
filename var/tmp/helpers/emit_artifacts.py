@@ -158,7 +158,7 @@ def write_json(lang: str, ex: str,
     return dest
 
 
-_TAIL_ALLOW = {"--share-net"}
+_TAIL_ALLOW = {"--share-net", "--unshare-net", "--unshare-uts", "--unshare-ipc"}
 
 
 def _filter_tail(tokens: List[str]) -> List[str]:

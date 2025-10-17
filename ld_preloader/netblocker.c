@@ -141,6 +141,7 @@ static void free_rules(void) {
   }
 }
 
+//TODO: we should supply allow list as an argument to the binary instead of env var NETBLOCKER_CONF
 static void load_rules_inner(void) {
   const char * cfg = getenv("NETBLOCKER_CONF");
   if (!cfg) return;

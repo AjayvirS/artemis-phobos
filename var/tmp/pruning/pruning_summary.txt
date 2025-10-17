@@ -150,3 +150,21 @@ When to Use Which
     Top-down is almost always faster for real-world builds, because large portions of a project (e.g. docs, generated caches, examples) can be hidden in one shot.
 
 In practice, the top-down pruning with strategic skip-patterns or forced-bind seeds gives you a scalable, language-agnostic sandbox that converges in tens of runs rather than hundreds or thousands—while still ensuring that only the truly required paths remain exposed.
+
+
+
+Base Config:
+
+    Reuse: Reuse of Linux
+    Renew: Change of used Linux
+
+Java Config
+
+    Reuse: Reuse JDK without using new features
+    Renew: Change of used JDK OR using new features of JDK, which need to be used aside from Exercvise Specific Policy
+
+H01E01 Config
+
+    Reuse: Reuse H01E01 without changes
+    Renew: Created a new H01E01 and use Ares 2 Pre-Compile OR change old H01E01 and re-run Ares 2 Pre-Compile => H01E01 Config is generated out of Exercvise Specific Policy
+

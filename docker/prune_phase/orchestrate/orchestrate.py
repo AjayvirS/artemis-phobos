@@ -163,7 +163,7 @@ def _sanitize_tail_tokens(tokens: List[str], runtime_chdir: str) -> List[str]:
     out += ['--chdir', runtime_chdir]
     return out
 
-_ALLOWED_TAIL_FLAGS = {"--share-net"}
+_ALLOWED_TAIL_FLAGS = {"--share-net", "--unshare-net", "--unshare-uts", "--unshare-ipc"}
 
 # ────────────────────────────────────────── tail handling
 
