@@ -14,7 +14,6 @@ services:
         source: ./var/tmp
         target: /var/tmp
     command: ["--verbose", "--cache-dir", "/home/sandboxuser/.gradle", "java" ]
-
   prune_c:
     build: docker/prune_phase/c
     volumes:

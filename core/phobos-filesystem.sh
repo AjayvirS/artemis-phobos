@@ -12,16 +12,27 @@ CMD=("$@")
 RO="${SPEC_DIR}/ro.paths"; RW="${SPEC_DIR}/rw.paths"; HIDE="${SPEC_DIR}/hide.paths"; TAIL="${SPEC_DIR}/tail.flags"
 BWRAP="${BWRAP_BIN:-bwrap}"; TIMEOUT_BIN="${TIMEOUT_BIN:-timeout}"
 
-# If no constraints at all, run raw
-if [[ ! -s "$RO" && ! -s "$RW" && ! -s "$HIDE" && ! -s "${SPEC_DIR}/net.rules" && -z "${PHB_TIMEOUT_SEC:-}" ]]; then
-  exec "${CMD[@]}"
+args=()
+if [[ -s "${HIDE}" ]]; then
+  while IFS= read -r p; do [[ -z "$p" ]] && continue; args+=( --tmpfs "$p" ); done < "${HIDE}"
+fi
+if [[ -s "${RO}" ]]; then
+  while IFS= read -r p; do [[ -z "$p" ]] && continue; args+=( --ro-bind "$p" "$p" ); done < "${RO}"
+fi
+if [[ -s "${RW}" ]]; then
+  while IFS= read -r p; do
+    [[ -z "$p" ]] && continue
+    if [[ ! -e "$p" && "$p" != */ ]]; then mkdir -p "$(dirname "$p")" 2>/dev/null || true; : > "$p" || true; fi
+    args+=( --bind "$p" "$p" )
+  done < "${RW}"
+fi
+if [[ -s "${TAIL}" ]]; then
+  args+=( $(<"${TAIL}") )
 fi
 
-args=(--dev-bind / /)
-if [[ -s "${HIDE}" ]]; then while IFS= read -r p; do [[ -z "$p" ]] && continue; args+=(--tmpfs "$p"); done < "${HIDE}"; fi
-if [[ -s "${RO}" ]]; then while IFS= read -r p; do [[ -z "$p" ]] && continue; args+=(--ro-bind "$p" "$p"); done < "${RO}"; fi
-if [[ -s "${RW}" ]]; then while IFS= read -r p; do [[ -z "$p" ]] && continue; args+=(--bind "$p" "$p"); done < "${RW}"; fi
-if [[ -s "${TAIL}" ]]; then args+=($(<"${TAIL}")); fi
+if [[ -n "${PHOBOS_DEBUG:-}" ]]; then
+  >&2 printf '[phobos] bwrap '; printf '%q ' "${args[@]}"; printf ' -- '; printf '%q ' "${CMD[@]}"; echo >&2
+fi
 
 OUTLOG="$(mktemp -t phobos-out.XXXXXX)"; ERRLOG="$(mktemp -t phobos-err.XXXXXX)"
 trap 'rm -f "$OUTLOG" "$ERRLOG"' EXIT

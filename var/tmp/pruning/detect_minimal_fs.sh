@@ -1,342 +1,219 @@
-#!/bin/bash
-# minimal_fs_prune.sh
-#
-# A language-agnostic script that prunes filesystem access by iteratively
-# testing a user-provided bash script (“build/test command”) inside bubblewrap.
-# The parent directory (TARGET) is mounted read-only; subdirectories are tested in
-# the order hide (n) → read-only (r) → writable (w). Any environment variables
-# for the build tool can be passed in as arguments or set externally.
+#!/usr/bin/env bash
+# detect_minimal_fs.sh – language-agnostic pruning; API unchanged.
+set -euo pipefail
 
-# **Stable output contract:** On success (or best-effort completion), this
-# script writes a *human-readable audit log* named `final_bindings.txt` in the
-# current working directory. Each line has the form:
-#     /abs/path -> n|r|w
-# followed by summary lines:
-#     Total Command Attempts: N
-#     Base options: <bubblewrap flags...>
-#     Tail options: <bubblewrap flags...>
-# Downstream tooling (run_minimal_fs_all.sh) consumes this log to produce
-# machine-readable artifacts (.paths, JSON, TailPhobos.cfg). Do not change the
-# log format without updating those tools.
+# ── logging ──────────────────────────────────────────────────────────────────
+err()   { echo -e "\e[31m[error]\e[0m $*" >&2; exit 1; }
+warn()  { echo -e "\e[33m[warn]\e[0m  $*" >&2; }
+log()   { [[ "${LOG_ENABLED:-0}" -eq 1 ]] && echo "[LOG] $*"; }
+error() { err "$@"; }
 
-###############################################################################
-# 1) ARGUMENT AND ENV VAR HANDLING
-###############################################################################
+# returns 0 if $1 has prefix of any subsequent args
+is_in_list() { local p=$1; shift; for x; do [[ $p == "$x"* ]] && return 0; done; return 1; }
 
+# ── CLI / defaults ───────────────────────────────────────────────────────────
 TARGET="/"
 BUILD_SCRIPT="/bin/true"
 BUILD_ENV_VARS=""
 TEST_DIR=""
 ASSIGN_DIR=""
 LOG_ENABLED=0
-LANG=
-
-# incase build framework shows "build failure" due to failing tests and not binding error, script should continue pruning
-# Default patterns treated as *harmless test failures* rather than infra errors
-
+LANG=""
 
 IGNORABLE_FAILURE_PATTERNS=${IGNORABLE_FAILURE_PATTERNS:-"There were failing tests|> Task :(compileJava|compileTestJava) NO-SOURCE"}
 UNIGNORABLE_SUCCESS_PATTERNS=${UNIGNORABLE_SUCCESS_PATTERNS:-"> Task :(compileJava|compileTestJava) NO-SOURCE"}
+# single alternation regex (grep -E)
+INFRA_FAILURE_PATTERNS=${INFRA_FAILURE_PATTERNS:-'^(Could not import runpy module|Traceback \(most recent call last\):|Fatal [[:alpha:]].*error:|ModuleNotFoundError: No module named )'}
 
-##############################################################################
-# Canonical path classes
-##############################################################################
-# Kernel pseudo—always mounted by --proc / --dev
-readonly PSEUDO_FS=( /proc /dev /sys /run /tmp )
-
-# Volatile caches we rarely need for reproducible builds
+readonly PSEUDO_FS=( /proc /dev /sys /run )
 readonly LARGE_VOLATILE=( /var/tmp /var/cache )
+readonly CRITICAL_TOP=( /bin /sbin /usr /lib /lib64 /etc )
 
-# Always-needed read-only system directories
-readonly CRITICAL_TOP=( /bin /sbin /usr /lib /lib64 /lib32 /libx32 /etc )
-
-# Helper: test if $1 is (or is below) any element in subsequent array
-is_in_list() {
-    local p=$1; shift
-    for x; do [[ $p == $x* ]] && return 0; done
-    return 1
-}
-
-
-
-# Parse command-line arguments
-# Example usage:
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --script)
-      BUILD_SCRIPT="$2"
-      shift 2
-      ;;
-    --target)
-      TARGET="$2"
-      shift 2
-      ;;
-    --env)
-      # Takes environment variables
-      BUILD_ENV_VARS="$BUILD_ENV_VARS env $2"
-      shift 2
-      ;;
-    --assignment-dir)
-      ASSIGN_DIR=$2
-      shift 2
-      ;;
-    --test-dir)
-      TEST_DIR=$2
-      shift 2
-      ;;
-    --verbose)
-      LOG_ENABLED=1
-      shift
-      ;;
-    --lang)
-      LANG="$2"
-      shift 2
-      ;;
-    *)
-      echo "Unknown argument: $1" >&2
-      exit 1
-      ;;
+    --script)         BUILD_SCRIPT="$2"; shift 2;;
+    --target)         TARGET="$2"; shift 2;;
+    --env)            BUILD_ENV_VARS="$BUILD_ENV_VARS env $2"; shift 2;;
+    --assignment-dir) ASSIGN_DIR="$2"; shift 2;;
+    --test-dir)       TEST_DIR="$2"; shift 2;;
+    --verbose)        LOG_ENABLED=1; shift;;
+    --lang)           LANG="$2"; shift 2;;
+    *)                echo "Unknown argument: $1" >&2; exit 1;;
   esac
 done
 
-# If needed, we can read environment variables from outside (for caching).
-# e.g. PERSISTENT_GRADLE_HOME, PERSISTENT_M2_REPO, etc.
-# If not set externally, define defaults:
 PERSISTENT_BUILD_HOME="${PERSISTENT_BUILD_HOME:-}"
 BUILD_OPTS="${BUILD_OPTS:-}"
-
-###############################################################################
-# 2) GLOBAL SETUP
-###############################################################################
 IFS=',' read -r -a EXTRA_RO <<<"${BWRAP_EXTRA_RO:-}"
 IFS=',' read -r -a EXTRA_RW <<<"${BWRAP_EXTRA_RW:-}"
+for p in "${EXTRA_RO[@]}"; do [[ -z "$p" ]] || [[ -e $p ]] || err "BWRAP_EXTRA_RO path does not exist: $p"; done
+for p in "${EXTRA_RW[@]}"; do [[ -z "$p" ]] || [[ -e $p ]] || err "BWRAP_EXTRA_RW path does not exist: $p"; done
 
-# If BWRAP_EXTRA_RO or BWRAP_EXTRA_RW are set, mark them as read-only because cache is supposed to be read at least.
+# ── host vs sandbox paths ────────────────────────────────────────────────────
+IN_SB_ROOT="/var/tmp/testing-dir"
+HOST_WORKDIR="${HOST_WORKDIR:-}"   # may be injected by wrapper
+
+# Auto-fallback: if BUILD_SCRIPT is an in-sandbox path and HOST_WORKDIR is empty,
+# assume we’re running from the host copy of the exercise and PWD mirrors IN_SB_ROOT.
+if [[ "$BUILD_SCRIPT" == "$IN_SB_ROOT/"* && -z "$HOST_WORKDIR" ]]; then
+  rel="${BUILD_SCRIPT#${IN_SB_ROOT}/}"        # e.g. "build_script.sh" or "subdir/file"
+  if [[ -e "$PWD/$rel" ]]; then
+    HOST_WORKDIR="$PWD"
+  fi
+fi
+
+# Decide sandbox workdir + script path
+if [[ -e "$BUILD_SCRIPT" ]]; then
+  # host path supplied (less common)
+  SANDBOX_WORKDIR="$(cd "$(dirname "$BUILD_SCRIPT")" && pwd)"
+  IN_SB_SCRIPT="$BUILD_SCRIPT"
+else
+  # in-sandbox path supplied (recommended); need the host dir to bind
+  [[ -n "$HOST_WORKDIR" && -d "$HOST_WORKDIR" ]] \
+    || err "BUILD_SCRIPT is an in-sandbox path; set HOST_WORKDIR to the host exercise folder"
+  SANDBOX_WORKDIR="$IN_SB_ROOT"
+  IN_SB_SCRIPT="$BUILD_SCRIPT"
+fi
+
+log "BUILD_SCRIPT=${BUILD_SCRIPT}"
+log "HOST_WORKDIR=${HOST_WORKDIR:-<unset>}"
+log "SANDBOX_WORKDIR=${SANDBOX_WORKDIR}"
+log "IN_SB_SCRIPT=${IN_SB_SCRIPT}"
+
+# ── state ────────────────────────────────────────────────────────────────────
+unset -v PROTECTED_R CONFIG 2>/dev/null || true
 declare -A PROTECTED_R
-for p in "${EXTRA_RO[@]}" "${EXTRA_RW[@]}"; do
-  a=$p
-  while [[ $a != "/" ]]; do
-    PROTECTED_R["$a"]=1
-    a=$(dirname "$a")
-  done
-done
-
-
+declare -A CONFIG
+PROTECTED_R["$SANDBOX_WORKDIR"]=1   # never hide the mountpoint
 
 BWRAP_COMMAND_COUNT=0
 
+# ── base & tail options ──────────────────────────────────────────────────────
 BASE_OPTIONS=(
-    --proc /proc
-    --dev  /dev
-    --tmpfs /tmp
-    --bind /tmp /tmp
+  --tmpfs /
+  --tmpfs /tmp
+  --bind /tmp /tmp
 )
 
-# add read-only bind for every critical dir that exists
-for dir in "${CRITICAL_TOP[@]}" "${LARGE_VOLATILE[@]}"; do
-    [[ -d $dir ]] && BASE_OPTIONS+=( --ro-bind "$dir" "$dir" )
+for d in /bin /usr/bin /lib /lib64 /usr/lib /lib/x86_64-linux-gnu; do
+  [[ -e "$d" ]] && BASE_OPTIONS+=( --ro-bind "$d" "$d" )
 done
+[[ -d /etc ]] && BASE_OPTIONS+=( --ro-bind /etc /etc )
 
+TAIL_OPTIONS=( --proc /proc --dev /dev --share-net --unshare-pid --unshare-utc --unshare-ipc --chdir "$SANDBOX_WORKDIR" )
 
-# user supplied extra binds, e.g. for caching build frameworks across prune runs
-for p in "${EXTRA_RO[@]}"; do
-    [[ -e $p ]] || error "BWRAP_EXTRA_RO path does not exist: $p"
-done
-
-for p in "${EXTRA_RW[@]}"; do
-    [[ -e $p ]] || error "BWRAP_EXTRA_RW path does not exist: $p"
-done
-
-
-work_dir=$(dirname "$BUILD_SCRIPT")
-TAIL_OPTIONS=(
-    --share-net
-    --unshare-user
-    --unshare-pid
-    --unshare-ipc
-    --chdir "$work_dir"
-)
-
-log() {
-    if [[ "$LOG_ENABLED" -eq 1 ]]; then
-        echo "[LOG] $*"
-    fi
-}
-
-
-# The associative array CONFIG will store our subdirectory => state (n/r/w).
-declare -A CONFIG
-
-# We assume that if PERSISTENT_BUILD_HOME is non-empty, the user wants
-# to pass that environment variable into bubblewrap, e.g. for Gradle or Maven caches.
-# Similarly for BUILD_OPTS.
-###############################################################################
-# 3) INITIAL CONFIG: everything "r" by default, skipping critical system dirs
-###############################################################################
+# ── init candidate config ────────────────────────────────────────────────────
 init_config() {
   shopt -s dotglob
   for item in "$TARGET"*; do
     [[ -d $item ]] || continue
-    is_in_list "$item" "${PSEUDO_FS[@]}" "${LARGE_VOLATILE[@]}" "${CRITICAL_TOP[@]}" && continue
+    is_in_list "$item" "${PSEUDO_FS[@]}" && continue
     CONFIG["$item"]="r"
   done
   shopt -u dotglob
 }
 
-
-###############################################################################
-# 4) BUILD THE BWRAP COMMAND
-###############################################################################
+# ── build bwrap invocation ───────────────────────────────────────────────────
 build_bwrap_command() {
   local options=("${BASE_OPTIONS[@]}")
-
-  # If TARGET isn't the root, bind it read-only first
-  if [ "$TARGET" != "/" ]; then
-    options+=(--ro-bind "$TARGET" "$TARGET")
+  if [[ "$TARGET" != "/" ]]; then
+    options+=( --ro-bind "$TARGET" "$TARGET" )
   fi
 
-  # Collect depth:weight:path entries
-  local list=() path depth weight mode
+  local list=() path depth weight state
   for path in "${!CONFIG[@]}"; do
-    mode=${CONFIG[$path]}
-    depth=$(grep -o "/" <<<"$path" | wc -l)
-    case "$mode" in
-      n) weight=0 ;;
-      r) weight=1 ;;
-      w) weight=2 ;;
-    esac
+    [[ -z "$path" ]] && continue
+    depth=$(grep -o "/" <<<"$path" | wc -l || true)
+    state="${CONFIG[$path]}"
+    case "$state" in n) weight=0;; r) weight=1;; w) weight=2;; esac
     list+=("$depth:$weight:$path")
   done
 
-  # Sort by depth then weight and extract paths
-  local sorted_paths
-  readarray -t sorted_paths < <(
-    printf '%s\n' "${list[@]}" |
-      sort -t: -k1,1n -k2,2n |
-      cut -d: -f3-
+  local sorted_paths=()
+  ((${#list[@]})) && readarray -t sorted_paths < <(
+    printf '%s\n' "${list[@]}" | sort -t: -k1,1n -k2,2n | cut -d: -f3-
   )
 
-  # Apply bindings in sorted order
   for path in "${sorted_paths[@]}"; do
-    case "${CONFIG[$path]}" in
-      n) options+=(--tmpfs "$path") ;;  # hide
-      w) options+=(--bind "$path" "$path") ;;  # write
-      r) options+=(--ro-bind "$path" "$path") ;;  # read-only
+    [[ -z "$path" ]] && continue
+    state="${CONFIG[$path]:-}" ; [[ -z "$state" ]] && continue
+    case "$state" in
+      n) options+=( --tmpfs "$path" ) ;;
+      r) options+=( --ro-bind "$path" "$path" ) ;;
+      w) options+=( --bind    "$path" "$path" ) ;;
     esac
   done
 
-  # Add any extra read-write binds provided by the user (e.g. for caching)
-  for p in "${EXTRA_RO[@]}"; do
-      [[ -e $p ]] || error "BWRAP_EXTRA_RO path does not exist: $p"
-      BASE_OPTIONS+=( --ro-bind "$p" "$p" )
-  done
-
-  for p in "${EXTRA_RW[@]}"; do
-      [[ -e $p ]] || error "BWRAP_EXTRA_RW path does not exist: $p"
-      BASE_OPTIONS+=( --bind    "$p" "$p" )
-  done
-
-  # Append tail options
+  for p in "${EXTRA_RO[@]}"; do [[ -z "$p" ]] || options+=( --ro-bind "$p" "$p" ); done
+  for p in "${EXTRA_RW[@]}"; do [[ -z "$p" ]] || options+=( --bind    "$p" "$p" ); done
+  # Ensure sandbox path exists, then bind the host exercise *after* parent mounts
+  options+=( --dir /var --dir /var/tmp --dir "$SANDBOX_WORKDIR" )
+  options+=( --bind "$HOST_WORKDIR" "$SANDBOX_WORKDIR" )
   options+=("${TAIL_OPTIONS[@]}")
 
-  # Build environment variables
   local env_part=""
-  [ -n "$PERSISTENT_BUILD_HOME" ] && env_part+=" env BUILD_HOME=$PERSISTENT_BUILD_HOME"
-  [ -n "$BUILD_OPTS" ]           && env_part+=" BUILD_OPTS='$BUILD_OPTS'"
-  [ -n "$BUILD_ENV_VARS" ]       && env_part+=" $BUILD_ENV_VARS"
+  [[ -n "$PERSISTENT_BUILD_HOME" ]] && env_part+=" env BUILD_HOME=$PERSISTENT_BUILD_HOME"
+  [[ -n "$BUILD_OPTS"           ]] && env_part+=" BUILD_OPTS='$BUILD_OPTS'"
+  [[ -n "$BUILD_ENV_VARS"       ]] && env_part+=" $BUILD_ENV_VARS"
 
-  # Construct and print the final command
-  local cmd="bwrap $(printf '%s ' "${options[@]}")${env_part} /bin/bash -c '$BUILD_SCRIPT'"
-  echo "$cmd"
+  echo "bwrap $(printf '%s ' "${options[@]}")${env_part} /bin/bash -c '$IN_SB_SCRIPT'"
 }
 
-
-
-#############################
-# test_build_script
-#############################
-# Runs the current bwrap command, counts attempts, and decides whether
-# the result should be treated as an infrastructure failure (return non-0)
-# or merely a user-test failure (return 0 so pruning continues).
-#
-# Configure ignorable patterns via:
-#   export IGNORABLE_FAILURE_PATTERNS='There were failing tests|==.*short test summary'
-# Add more ‘harmless’ patterns per language as needed.
-#############################
+# ── run one attempt ──────────────────────────────────────────────────────────
 test_build_script() {
-    local cmd
-    cmd=$(build_bwrap_command)
-    ((BWRAP_COMMAND_COUNT++))
-    log "Testing command number: $BWRAP_COMMAND_COUNT"
+  local cmd tmpfile exit_code status
+  cmd=$(build_bwrap_command)
+  ((BWRAP_COMMAND_COUNT++))
+  log "Testing command number: $BWRAP_COMMAND_COUNT"
 
+  tmpfile="/tmp/build-${BWRAP_COMMAND_COUNT}.log"
+  { echo "=== Run #${BWRAP_COMMAND_COUNT} Command ==="; echo "$cmd"; echo; } >"$tmpfile"
 
-    # run command, capture combined output for inspection
-    tmpfile="/tmp/build-${BWRAP_COMMAND_COUNT}.log"
+  set +e
+  bash -c "$cmd" >>"$tmpfile" 2>&1
+  exit_code=$?
+  set -e
 
-    echo "=== Run #${BWRAP_COMMAND_COUNT} Command ===" >"$tmpfile"
+  # non-zero but ignorable → success
+  if (( exit_code != 0 )) && [[ -n ${IGNORABLE_FAILURE_PATTERNS:-} ]] \
+     && grep -Eq "${IGNORABLE_FAILURE_PATTERNS}" "$tmpfile"; then
+    exit_code=0
+  fi
+  # zero but infra-fatal lines present → failure
+  if (( exit_code == 0 )) && [[ -n ${INFRA_FAILURE_PATTERNS:-} ]] \
+     && grep -Eq "${INFRA_FAILURE_PATTERNS}" "$tmpfile"; then
+    exit_code=1
+  fi
+  # zero but “unignorable success” → failure
+  if (( exit_code == 0 )) && [[ -n ${UNIGNORABLE_SUCCESS_PATTERNS:-} ]] \
+     && grep -Eq "${UNIGNORABLE_SUCCESS_PATTERNS}" "$tmpfile"; then
+    exit_code=1
+  fi
 
-    echo "$cmd" >>"$tmpfile"
-    echo ""  >>"$tmpfile"
-
-    set +e
-    eval "$cmd" >"$tmpfile" 2>&1
-    exit_code=$?
-    set -e
-
-    # 1) If it failed but matches an IGNORABLE_FAILURE_PATTERNS, treat as success
-    if (( exit_code != 0 )) \
-       && [[ -n $IGNORABLE_FAILURE_PATTERNS ]] \
-       && grep -Eq "$IGNORABLE_FAILURE_PATTERNS" "$tmpfile"; then
-      exit_code=0
-    fi
-
-    # 2) If it succeeded but matches an UNIGNORABLE_SUCCESS_PATTERNS, treat as failure
-    if (( exit_code == 0 )) \
-       && [[ -n $UNIGNORABLE_SUCCESS_PATTERNS ]] \
-       && grep -Eq "$UNIGNORABLE_SUCCESS_PATTERNS" "$tmpfile"; then
-      exit_code=1
-    fi
-
-
-    if [[ $exit_code -eq 0 ]]; then
-        status="success"
-    else
-        status="fail"
-    fi
-    logfile="/tmp/build-${BWRAP_COMMAND_COUNT}-${status}.log"
-    mv "$tmpfile" "$logfile"
-    log "Logs for run #${BWRAP_COMMAND_COUNT}: $logfile"
-
-    return $exit_code
+  [[ $exit_code -eq 0 ]] && status="success" || status="fail"
+  mv "$tmpfile" "/tmp/build-${BWRAP_COMMAND_COUNT}-${status}.log"
+  log "Logs for run #${BWRAP_COMMAND_COUNT}: /tmp/build-${BWRAP_COMMAND_COUNT}-${status}.log"
+  return $exit_code
 }
 
-###############################################################################
-# 6) PRUNE TREE LOGIC (hide -> read-only -> writable)
-###############################################################################
+# ── pruning (hide → ro → rw) ─────────────────────────────────────────────────
 prune_tree() {
   local parent="$1"
   log "Pruning subdirectories of $parent"
   for child in "${parent%/}"/*; do
-    [ -d "$child" ] || continue
-    # skip system directories
+    [[ -d "$child" ]] || continue
     is_in_list "$child" "${PSEUDO_FS[@]}" && continue
-
-    # skip cached read directory
     [[ -n "${PROTECTED_R[$child]:-}" ]] && continue
 
     log "Testing candidate: $child"
-
-    # Try n => hidden
     CONFIG["$child"]="n"
     if test_build_script; then
       log "$child => not required (n)"
     else
-      # Try r => read-only
       CONFIG["$child"]="r"
       if test_build_script; then
         log "$child => read-only (r)"
       else
-        # Try w => writable
         CONFIG["$child"]="w"
         if test_build_script; then
           log "$child => must be writable (w)"
@@ -346,83 +223,83 @@ prune_tree() {
         fi
       fi
     fi
-
-    # Recurse if not hidden
-    if [ "${CONFIG[$child]}" != "n" ]; then
+    if [[ -v CONFIG["$child"] ]] && [[ "${CONFIG[$child]}" != "n" ]]; then
       prune_tree "$child"
     fi
   done
 }
 
-# reduce amount of bindings for argument optimisation
-# after pruning, before serializing CONFIG:
+# ── compaction (best-effort) ─────────────────────────────────────────────────
 collapse_readonly_parents() {
-  # look at every directory that’s all r, drop its children
-  for parent in "${!CONFIG[@]}"; do
-    [[ "${CONFIG[$parent]}" = r ]] || continue
-    # see if _every_ existing child is also r
-    all_r=true
+  local parent child all_r any_child
+  local _oldnullglob _olddotglob
+  shopt -q nullglob; _oldnullglob=$?
+  shopt -q dotglob;  _olddotglob=$?
+  shopt -s nullglob dotglob
+
+  local -a parents=(); local k
+  for k in "${!CONFIG[@]}"; do parents+=("$k"); done
+
+  for parent in "${parents[@]}"; do
+    [[ "${CONFIG[$parent]:-}" = r ]] || continue
+    all_r=true; any_child=false
     for child in "$parent"/*; do
-      [[ -d "$child" ]] && [[ "${CONFIG[$child]:-r}" = r ]] || { all_r=false; break; }
+      [[ -d "$child" ]] || continue
+      if [[ -v CONFIG["$child"] ]]; then
+        any_child=true
+        [[ "${CONFIG[$child]:-}" = r ]] || { all_r=false; break; }
+      fi
     done
-    if $all_r; then
-      # we can remove all child entries
+    if $any_child && $all_r; then
       for child in "$parent"/*; do
-        unset CONFIG["$child"]
+        [[ -d "$child" ]] || continue
+        [[ -v CONFIG["$child"] ]] && unset 'CONFIG[$child]'
       done
     fi
   done
+
+  (( _oldnullglob )) && shopt -u nullglob
+  (( _olddotglob  )) && shopt -u dotglob
 }
 
+demote_writable_parents() {
+  local -a keys=(); local k
+  for k in "${!CONFIG[@]}"; do keys+=("$k"); done
+  ((${#keys[@]})) && mapfile -t keys < <(
+    printf '%s\n' "${keys[@]}" | awk -F/ '{print (NF-1) "\t" $0}' | sort -rn | cut -f2-
+  )
 
+  local parent maybe any_w
+  for parent in "${keys[@]}"; do
+    [[ "${CONFIG[$parent]:-}" == "w" ]] || continue
+    any_w=false
+    for maybe in "${!CONFIG[@]}"; do
+      [[ "$maybe" == "$parent"* && "$maybe" != "$parent" ]] || continue
+      [[ "${CONFIG[$maybe]:-}" == "w" ]] && { any_w=true; break; }
+    done
+    $any_w || CONFIG["$parent"]="r"
+  done
+}
 
-
-
-###############################################################################
-# 7) SAVE CONFIG
-###############################################################################
+# ── write result ─────────────────────────────────────────────────────────────
 save_configuration() {
   local outfile="final_bindings.txt"
   echo "Saving final binding configuration to $outfile" > "$outfile"
-  log "Saving final binding configuration to $outfile"
   for key in "${!CONFIG[@]}"; do
     echo "$key -> ${CONFIG[$key]}" >> "$outfile"
   done
   echo "Total Command Attempts: $BWRAP_COMMAND_COUNT" >> "$outfile"
   echo "Base options: ${BASE_OPTIONS[*]}" >> "$outfile"
   echo "Tail options: ${TAIL_OPTIONS[*]}" >> "$outfile"
-
   log "Total Command Attempts: $BWRAP_COMMAND_COUNT"
   log "Base options: ${BASE_OPTIONS[*]}"
   log "Tail options: ${TAIL_OPTIONS[*]}"
 }
 
-
-demote_writable_parents() {
-  for child in "${!CONFIG[@]}"; do
-    [[ ${CONFIG[$child]} == "w" ]] && continue
-    parent=$(dirname "$child")
-    while [[ $parent != "/" ]]; do
-      if [[ ${CONFIG[$parent]:-} == "w" ]]; then
-          CONFIG["$parent"]="r"
-      fi
-      parent=$(dirname "$parent")
-    done
-  done
-}
-
-
-
-###############################################################################
-# 9) MAIN EXECUTION
-###############################################################################
-
+# ── main ─────────────────────────────────────────────────────────────────────
 log "Initializing configuration for target: $TARGET"
 init_config
-for key in "${!CONFIG[@]}"; do
-  CONFIG["$key"]="w"
-done
-
+for key in "${!CONFIG[@]}"; do CONFIG["$key"]="w"; done
 
 log "Testing with full writable configuration..."
 if ! test_build_script; then
@@ -430,29 +307,19 @@ if ! test_build_script; then
   exit 1
 fi
 
-
-
-
-log "Running pruning for exercises of $LANG..."
+log "Running pruning for exercises of ${LANG:-<unknown>}..."
 prune_tree "$TARGET"
-demote_writable_parents
 
-log "Final mount configuration:"
-for key in "${!CONFIG[@]}"; do
-  log "$key -> ${CONFIG[$key]}"
-done
+# never fail a successful prune during compaction
+set +e
+demote_writable_parents || true
+collapse_readonly_parents || true
+set -e
 
-collapse_readonly_parents
-if [[ -n "$ASSIGN_DIR" ]]; then
-  log "Forcing read-only bind on assignment dir: $ASSIGN_DIR"
-  CONFIG["$ASSIGN_DIR"]=r
-fi
+[[ -n "$ASSIGN_DIR" ]] && { log "Force RO on assignment dir: $ASSIGN_DIR"; CONFIG["$ASSIGN_DIR"]=r; }
+[[ -n "$TEST_DIR"   ]] && { log "Force RO on test dir: $TEST_DIR";   CONFIG["$TEST_DIR"]=r; }
+for p in "${EXTRA_RO[@]}"; do [[ -z "$p" ]] || CONFIG["$p"]="r"; done
+for p in "${EXTRA_RW[@]}"; do [[ -z "$p" ]] || CONFIG["$p"]="w"; done
 
-if [[ -n "$TEST_DIR" ]]; then
-  log "Forcing read-only bind on test dir: $TEST_DIR"
-  CONFIG["$TEST_DIR"]=r
-fi
-
-for p in "${EXTRA_RO[@]}"; do CONFIG["$p"]="r"; done
-for p in "${EXTRA_RW[@]}"; do CONFIG["$p"]="w"; done
-save_configuration
+save_configuration || true
+exit 0
