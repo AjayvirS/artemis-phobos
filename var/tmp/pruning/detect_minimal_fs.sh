@@ -26,8 +26,6 @@ UNIGNORABLE_SUCCESS_PATTERNS=${UNIGNORABLE_SUCCESS_PATTERNS:-"> Task :(compileJa
 INFRA_FAILURE_PATTERNS=${INFRA_FAILURE_PATTERNS:-'^(Could not import runpy module|Traceback \(most recent call last\):|Fatal [[:alpha:]].*error:|ModuleNotFoundError: No module named )'}
 
 readonly PSEUDO_FS=( /proc /dev /sys /run )
-readonly LARGE_VOLATILE=( /var/tmp /var/cache )
-readonly CRITICAL_TOP=( /bin /sbin /usr /lib /lib64 /etc )
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
